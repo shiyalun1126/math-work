@@ -193,6 +193,20 @@ def explain_enabled() -> bool:
     return bool(llm_key())
 
 
+def solve_timeout() -> float:
+    """单个式子允许 SymPy 算多久（秒）。超了就停，返回"超范围"而不是继续干等。
+
+    默认 8 秒：正常题中位 0.01 秒，超过 8 秒的基本都是没有初等解法的
+    嵌套根式/超越方程，再算下去只会把一个死循环包装成"正在思考"。
+    """
+    raw = get("SOLVE_TIMEOUT", "8")
+    try:
+        val = float(raw)
+    except ValueError:
+        return 8.0
+    return val if val > 0 else 8.0
+
+
 # 旧名字，pipeline / perceive 里还在用
 def dashscope_key() -> str:
     return vlm_key()

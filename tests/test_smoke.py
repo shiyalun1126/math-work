@@ -26,22 +26,28 @@ CASES = [
 
 
 def test_parse():
-    ok = 0
+    """用 assert 而不是 return：pytest 只看断言，`return False` 也会被记成通过。
+
+    以前这里写的是 `return ok == len(CASES)`，于是就算整张表全错，
+    测试仍然是绿的——这种"假绿"比没有测试更危险。
+    """
+    bad = []
     for tex, kind, expect_ok in CASES:
         pe = parse(tex)
         good = pe.ok == expect_ok and (not expect_ok or pe.kind == kind)
-        ok += good
         flag = "PASS" if good else "FAIL"
         print(f"[{flag}] {tex!r:46} ok={pe.ok} kind={pe.kind:10} {pe.error[:50]}")
-    print(f"parse {ok}/{len(CASES)}\n")
-    return ok == len(CASES)
+        if not good:
+            bad.append((tex, pe.ok, pe.kind, pe.error))
+    print(f"parse {len(CASES) - len(bad)}/{len(CASES)}\n")
+    assert not bad, f"解析不符合预期：{bad}"
 
 
 def test_normalize():
     got = normalize(r"\left( x+1 \right) \div 2 = 3。")
     want = "( x+1 ) / 2 = 3"
     print(f"normalize: {got!r} -> {'PASS' if got == want else 'FAIL ' + want!r}\n")
-    return got == want
+    assert got == want, f"归一化结果 {got!r}，期望 {want!r}"
 
 
 def test_verify_vote():
@@ -57,7 +63,6 @@ def test_verify_vote():
     assert v.verdict in ("ok", "review"), v.verdict
     assert v.chosen.replace(" ", "") in (r"x^2-5x+6=0", r"x^{2}-5x+6=0"), v.chosen
     print("vote PASS\n")
-    return True
 
 
 def test_review_when_split():
@@ -68,10 +73,16 @@ def test_review_when_split():
     ]
     v = verify(cands)
     print(f"平票: verdict={v.verdict} conf={v.confidence:.2f} 理由={v.reasons}")
-    print("review PASS\n" if v.verdict == "review" else "review FAIL\n")
+    # 这条断言以前不存在：函数只 print 不 assert，所以平票判错也一直是绿的。
+    assert v.verdict == "review", f"1:1 平票应判 review，实际 {v.verdict}"
+    print("review PASS\n")
 
 
 def test_solve():
+    expect = {
+        r"x^2-5x+6=0": {"x = 2", "x = 3"},
+        r"\begin{cases} x+y=3 \\ x-y=1 \end{cases}": {"x = 2，y = 1"},
+    }
     for tex in (r"x^2-5x+6=0", r"\frac{x+1}{x-2}=3", r"\int x e^x dx",
                 r"\begin{cases} x+y=3 \\ x-y=1 \end{cases}"):
         pe = parse(tex)
@@ -80,11 +91,14 @@ def test_solve():
         print(f"solve {tex!r:44} ok={sr.ok} -> {sols}")
         for st in sr.steps:
             print(f"        · {st.title}: {st.latex}")
+        assert sr.ok, f"{tex} 应该能解出来，实际：{sr.error}"
+        if tex in expect:
+            assert set(sr.solutions) == expect[tex], f"{tex} 解集是 {sr.solutions}"
     print()
 
 
 if __name__ == "__main__":
-    passed = [test_normalize(), test_parse(), test_verify_vote()]
-    test_review_when_split()
-    test_solve()
-    print("全部通过" if all(passed) else "有失败项")
+    for fn in (test_normalize, test_parse, test_verify_vote, test_review_when_split, test_solve):
+        fn()
+        print(f"{fn.__name__} 通过")
+    print("全部通过")

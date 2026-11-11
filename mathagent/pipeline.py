@@ -7,7 +7,9 @@ verdict 为 review 时不往下硬算，把选择权交回用户。
 from __future__ import annotations
 
 import json
+import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from .types import Candidate, ParsedExpr, PipelineResult, SolveResult, Verificat
 from .verify import verify as verify_candidates
 
 RUNS = config.ROOT / "runs"
+log = logging.getLogger(__name__)
 
 NO_KEY_HINT = (
     "还没有可用的识别通道。请在项目根目录的 .env 里填写 "
@@ -28,14 +31,32 @@ NO_KEY_HINT = (
 )
 
 
+def _one_source(rec: Recognizer, image, k: int) -> list[Candidate]:
+    """单个通道识别。异常就地转成带 note 的候选，不让一路故障拖垮整页。"""
+    try:
+        return rec.recognize(image, k=k)
+    except Exception as exc:  # noqa: BLE001
+        return [Candidate(latex="", source=rec.name, note=f"{type(exc).__name__}: {exc}")]
+
+
 def _collect(image, recognizers: list[Recognizer], k: int) -> list[Candidate]:
-    cands: list[Candidate] = []
-    for rec in recognizers:
-        try:
-            cands.extend(rec.recognize(image, k=k))
-        except Exception as exc:  # noqa: BLE001
-            cands.append(Candidate(latex="", source=rec.name, note=f"{type(exc).__name__}: {exc}"))
-    return cands
+    """多个识别通道**并发**跑。
+
+    这里原来是串行 for 循环，于是「SimpleTex 8 秒 + 通义 12 秒」要等 20 秒。
+    两条通道互不依赖、连的是两家不同的服务，串行纯属白等——实测 perceive
+    最长 21.7 秒，并发后这个时间由最慢的一条决定。
+
+    候选顺序必须稳定（投票和展示都依赖它），所以用 map 而不是 as_completed，
+    返回顺序与 recognizers 一致。k 次采样仍留在各通道内部串行：
+    同一个模型连发 k 个请求更容易撞 429，换来的是退避重试，不划算。
+    """
+    if not recognizers:
+        return []
+    if len(recognizers) == 1:
+        return _one_source(recognizers[0], image, k)
+    with ThreadPoolExecutor(max_workers=len(recognizers), thread_name_prefix="perceive") as pool:
+        groups = list(pool.map(lambda r: _one_source(r, image, k), recognizers))
+    return [c for group in groups for c in group]
 
 
 def _longest(cands: list[Candidate]) -> str:
@@ -114,8 +135,10 @@ def run(
     sr = solve_parsed(pe) if pe.ok else SolveResult(kind=pe.kind, error=pe.error)
     timings["solve"] = time.time() - t0
 
-    # 认得出但算不出，多半是识别错了，降级为待确认
-    if v.verdict == "ok" and pe.ok and not sr.ok and sr.kind != "expression":
+    # 认得出但算不出，多半是识别错了，降级为待确认。
+    # 但「超出声明范围」不算：那是我们自己的边界，不是这张图的问题，
+    # 标成"待核对"会让学生以为是自己的式子有问题。
+    if v.verdict == "ok" and pe.ok and not sr.ok and sr.kind != "expression" and not sr.out_of_scope:
         v.verdict = "review"
         v.confidence = min(v.confidence, 0.5)
         v.reasons.append(f"能解析但求不出解（{sr.error}），可能是符号识别有误")
@@ -145,6 +168,12 @@ def run(
 
 
 def _save(result: PipelineResult, image) -> None:
+    """把这次运行落盘，方便事后复盘。
+
+    落盘失败不能影响主流程（学生对"结果算出来了但存不下来"没兴趣），
+    但也不能像以前那样 `except: pass`——真出问题时日志里一片空白，
+    只能靠猜。这里留一条 warning 就够定位了。
+    """
     try:
         RUNS.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
@@ -153,8 +182,36 @@ def _save(result: PipelineResult, image) -> None:
         (RUNS / f"{stamp}.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
         )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("运行记录写入失败（不影响结果）：%s: %s", type(exc).__name__, exc)
+        return
+    _prune_runs()
+
+
+RUN_KEEP = 500  # 只留最近这么多次运行
+
+
+def _prune_runs(keep: int = RUN_KEEP) -> int:
+    """删掉最旧的运行记录。平时只做一次目录列举，超过上限才真删。
+
+    不清的话这个目录会一直涨（调 prompt 时一天几百次），最后拖慢列举，
+    也没有人真的会翻三个月前的某次运行。
+    """
+    try:
+        files = list(RUNS.glob("*.json"))
+        if len(files) <= keep:
+            return 0
+        files.sort(key=lambda p: p.stat().st_mtime)
+        removed = 0
+        for p in files[: len(files) - keep]:
+            try:
+                p.unlink()
+                removed += 1
+            except OSError:
+                pass
+        return removed
     except Exception:  # noqa: BLE001
-        pass
+        return 0
 
 
 def resolve(latex: str) -> PipelineResult:

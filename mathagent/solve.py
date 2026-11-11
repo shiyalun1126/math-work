@@ -6,9 +6,12 @@
 
 from __future__ import annotations
 
+import threading
+
 import sympy
 from sympy import Derivative, Integral, Poly, solve as sp_solve
 
+from . import config
 from .latex import to_latex
 from .types import ParsedExpr, SolveResult, Step
 
@@ -18,6 +21,53 @@ def _symbols_of(exprs) -> list:
     for e in exprs:
         syms |= set(getattr(e, "free_symbols", set()))
     return sorted(syms, key=str)
+
+
+def _root_depth(e, _seen: int = 0) -> int:
+    """根式嵌套层数。√(x²+1) 算 1 层，∛(√(x²+1)+x) 算 2 层。
+
+    为什么要数这个：sympy 遇到嵌套根式会尝试一系列变换，其中某些分支
+    在符号层面几乎指数级膨胀。实测 y=∛(√(x²+1)+x)+∛(x-√(x²+1))
+    跑了 79.7 秒才放弃——用户看到的就是页面卡死一分多钟。
+    """
+    if _seen > 60:  # 病态输入别把自己递归炸了
+        return 0
+    deepest = 0
+    for a in getattr(e, "args", ()):
+        deepest = max(deepest, _root_depth(a, _seen + 1))
+    if isinstance(e, sympy.Pow) and isinstance(e.exp, sympy.Rational) and e.exp.q != 1:
+        deepest += 1
+    return deepest
+
+
+def _hard_reason(pe: ParsedExpr) -> str:
+    """解析之后、动 SymPy 之前先看一眼：这题是不是根本不该硬算。
+
+    把"我知道这题算不出来"和"我算了 80 秒然后放弃了"分开说，
+    是可信度的一部分——后者用户只会以为程序坏了。
+    """
+    obj = pe.obj
+    try:
+        if pe.kind == "equation":
+            exprs = [obj[0][0], obj[0][1]]
+        elif pe.kind == "system":
+            exprs = [e for pair in obj for e in pair]
+        else:
+            exprs = [obj[0]] if obj else []
+    except Exception:  # noqa: BLE001
+        return ""
+
+    try:
+        depth = max((_root_depth(e) for e in exprs), default=0)
+    except Exception:  # noqa: BLE001
+        return ""
+    if depth >= 2:
+        return (
+            "根号里面还套着根号（嵌套根式），这类方程没有统一的初等解法，"
+            "当前版本不硬解。可以先检查式子有没有抄错；"
+            "如果确实是这道题，把两边平方/立方逐步去掉根号后再问我。"
+        )
+    return ""
 
 
 def _denominator(expr):
@@ -226,15 +276,9 @@ def _solve_expression(expr, sr: SolveResult) -> None:
     sr.ok = True
 
 
-def solve(pe: ParsedExpr) -> SolveResult:
+def _solve_core(pe: ParsedExpr) -> SolveResult:
     sr = SolveResult(kind=pe.kind, problem_latex=pe.normalized)
-    if not pe.ok:
-        sr.error = f"无法解析：{pe.error}"
-        return sr
     obj = getattr(pe, "obj", None)
-    if not obj:
-        sr.error = "解析结果为空"
-        return sr
     try:
         if pe.kind == "equation":
             lhs, rhs = obj[0]
@@ -259,6 +303,66 @@ def solve(pe: ParsedExpr) -> SolveResult:
         sr.error = f"{type(exc).__name__}: {exc}"
         return sr
     return check_steps(sr)
+
+
+def _scope_exit(pe: ParsedExpr, msg: str) -> SolveResult:
+    sr = SolveResult(kind=pe.kind, problem_latex=pe.normalized)
+    sr.ok = False
+    sr.out_of_scope = True
+    sr.error = msg
+    return sr
+
+
+def solve(pe: ParsedExpr) -> SolveResult:
+    if not pe.ok:
+        sr = SolveResult(kind=pe.kind, problem_latex=pe.normalized)
+        sr.error = f"无法解析：{pe.error}"
+        return sr
+    if not getattr(pe, "obj", None):
+        sr = SolveResult(kind=pe.kind, problem_latex=pe.normalized)
+        sr.error = "解析结果为空"
+        return sr
+
+    # 先判"该不该算"，再谈"算得对不对"。
+    hard = _hard_reason(pe)
+    if hard:
+        return _scope_exit(pe, hard)
+
+    # 兜底超时：预判挡不住的情况（没见过的花样）还得有个止损点。
+    # 用 daemon 线程而不是进程池——超时后线程算完自然结束，不会占着进程不退。
+    timeout = config.solve_timeout()
+    box: dict[str, object] = {}
+
+    def work() -> None:
+        try:
+            box["r"] = _solve_core(pe)
+        except BaseException as exc:  # noqa: BLE001
+            box["e"] = exc
+
+    th = threading.Thread(target=work, daemon=True, name="solve-core")
+    th.start()
+    th.join(timeout)
+
+    if th.is_alive():
+        return _scope_exit(
+            pe,
+            f"这题算了 {timeout:g} 秒还没出结果，我先停下来了。"
+            "继续等下去也不会变快——通常是方程没有初等解法，"
+            "或者某个符号被认错了。可以先核对一下式子。",
+        )
+
+    err = box.get("e")
+    if isinstance(err, BaseException):
+        sr = SolveResult(kind=pe.kind, problem_latex=pe.normalized)
+        sr.error = f"{type(err).__name__}: {err}"
+        return sr
+
+    got = box.get("r")
+    if isinstance(got, SolveResult):
+        return got
+    sr = SolveResult(kind=pe.kind, problem_latex=pe.normalized)
+    sr.error = "求解没有返回结果"
+    return sr
 
 
 def summary(sr: SolveResult) -> str:

@@ -114,6 +114,10 @@ class SolveResult:
     steps: list[Step] = field(default_factory=list)
     dropped: list[str] = field(default_factory=list)
     error: str = ""
+    # 超出声明范围 / 算超时。和"算错了"是两件事：
+    # 前者该说"这题我现在算不了"，后者该说"你写的这步有问题"。
+    # 混在一起会让用户以为是自己错了。
+    out_of_scope: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -123,6 +127,7 @@ class SolveResult:
             "solutions": self.solutions,
             "dropped": self.dropped,
             "error": self.error,
+            "out_of_scope": self.out_of_scope,
             "steps": [
                 {"title": s.title, "latex": s.latex} for s in self.steps
             ],

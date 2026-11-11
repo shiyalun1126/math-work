@@ -932,5 +932,8 @@ if __name__ == "__main__":
         css=CSS,
         server_name="127.0.0.1",
         server_port=int(os.environ.get("MVP_PORT", "7860")),
-        show_error=True,
+        # 不把 traceback 推到前端：里面有本机绝对路径和内部调用栈，
+        # 分享给别人时等于把自己的目录结构贴出去。
+        # gr.Error 是显式抛的，消息照样会显示，不受这个开关影响。
+        show_error=False,
     )

@@ -11,9 +11,12 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
+import os
 import re
+import threading
 import time
 from pathlib import Path
 
@@ -27,6 +30,10 @@ from .types import Candidate
 MAX_SIDE = 1280  # 长边超过 1280 就缩，省 token 不影响单行公式
 PAD_RATIO = 0.04  # 裁完留一点边，太贴边模型容易漏掉首尾符号
 
+# 预处理结果的进程内缓存：同一张图会被多个识别通道同时要。
+_PREP_CACHE: dict[tuple, tuple[bytes, str]] = {}
+_PREP_LOCK = threading.Lock()
+
 # 限流退避：一次 429 不代表"这条通道废了"，只代表"这一秒太多"。
 # 免费档实测 3~5 秒后多半就通，直接放弃会让交叉验证退化成单源。
 THROTTLE_RETRY = 2      # 整轮重试次数（每轮把候选模型都试一遍）
@@ -34,6 +41,17 @@ THROTTLE_SLEEP = 4.0    # 第 n 轮前等 THROTTLE_SLEEP × n 秒
 
 # 模型的自言自语里才有的词。手写数学一行式子不会出现这些。
 _META_PROSE = re.compile(r"图片|图中|用户|规则|假设|要求|说明|以上|注意|最终结果|重新")
+
+# 缓存键的版本指纹。
+#
+# 只按「图片哈希 + 模型名 + 温度」做键是不够的：改了 QWEN_PROMPT 的措辞，
+# 同一张图仍然命中旧结果，看起来像"改了没效果"，实际是被缓存挡在后面。
+# 这比不缓存更糟——不缓存时你会立刻看到变化，缓存会让你以为改对了。
+# 所以提示词要算进键里（内容哈希，改一个字就自动失效）。
+#
+# 预处理（裁墨迹 / 缩放 / JPEG 质量）决定了送进模型的像素，
+# 但它没法像提示词那样自动算哈希，改动时手工把 _PREP_VERSION 加一。
+_PREP_VERSION = "prep1"
 
 
 class RecognitionError(RuntimeError):
@@ -64,7 +82,36 @@ def _ink_bbox(im: Image.Image, thr: int = 165) -> tuple[int, int, int, int] | No
 def prepare_image(
     path: str | Path, crop: bool = True, max_side: int = MAX_SIDE, min_side: int = 640
 ) -> tuple[bytes, str]:
-    """EXIF 摆正 → 裁到墨迹 → 缩到长边 max_side → JPEG。原图不动。"""
+    """EXIF 摆正 → 裁到墨迹 → 缩到长边 max_side → JPEG。原图不动。
+
+    同一张图会被多个识别通道各要一次。以前每一路都重新解码、裁剪、缩放一遍，
+    一张 4000px 的手机照要白白算两次——而两条通道本来就是并发的，
+    让它俩各算一次等于并发没并发。这里按「路径 + 修改时间 + 参数」记住结果，
+    第二次直接拿 bytes。
+    """
+    try:
+        stamp = os.path.getmtime(path)
+    except OSError:
+        stamp = 0.0
+    key = (str(Path(path).resolve()), stamp, crop, max_side, min_side)
+    hit = _PREP_CACHE.get(key)
+    if hit is not None:
+        return hit
+    with _PREP_LOCK:
+        # 双检：等着锁的那几路通常能在别人算完之后直接命中
+        hit = _PREP_CACHE.get(key)
+        if hit is not None:
+            return hit
+        val = _prepare_image_uncached(path, crop=crop, max_side=max_side, min_side=min_side)
+        if len(_PREP_CACHE) > 24:  # 一次评测动辄几十张图，别无限涨
+            _PREP_CACHE.clear()
+        _PREP_CACHE[key] = val
+        return val
+
+
+def _prepare_image_uncached(
+    path: str | Path, crop: bool = True, max_side: int = MAX_SIDE, min_side: int = 640
+) -> tuple[bytes, str]:
     im = Image.open(path)
     im = ImageOps.exif_transpose(im)  # 手机照片常靠 EXIF 标记方向，不摆正会横着送进去
     if im.mode not in ("RGB", "L"):
@@ -207,7 +254,7 @@ class SimpleTexRecognizer(Recognizer):
         if not self.available():
             raise RecognitionError("未配置 SIMPLETEX_TOKEN（见 .env 通道 1）")
         digest = file_digest(image)
-        hit = self.cache.get(digest, self.url)
+        hit = self.cache.get(digest, self.url, _PREP_VERSION)
         if hit:
             return [Candidate(**hit)]
 
@@ -247,7 +294,7 @@ class SimpleTexRecognizer(Recognizer):
         if latex.upper().startswith("[EMPTY"):
             raise RecognitionError("模型判定图片为空，检查是否拍到了公式")
         cand = Candidate(latex=latex, source=self.name, conf=res.get("conf"), elapsed=cost)
-        self.cache.put(cand.to_dict(), digest, self.url)
+        self.cache.put(cand.to_dict(), digest, self.url, _PREP_VERSION)
         return [cand]
 
 
@@ -262,6 +309,9 @@ QWEN_PROMPT = (
     "输出里不允许出现 ∫ √ π × ÷ ≤ ≥ ≠ ∞ 这些字符；"
     "5) 如果图里不是数学式子，只输出 NOMATH。"
 )
+
+# 提示词指纹：改动上面的 QWEN_PROMPT 一个字，这个值就变，旧缓存自动不命中。
+_PROMPT_FP = hashlib.sha256(QWEN_PROMPT.encode("utf-8")).hexdigest()[:8]
 
 
 def list_vl_models() -> list[str]:
@@ -433,7 +483,7 @@ class VLMRecognizer(Recognizer):
         out: list[Candidate] = []
         for i in range(max(1, k)):
             temp = round(0.2 + 0.3 * i, 2)
-            key = (digest, self.model, str(temp))
+            key = (digest, self.model, str(temp), _PREP_VERSION, _PROMPT_FP)
             hit = self.cache.get(*key)
             if hit:
                 out.append(Candidate(**hit))
