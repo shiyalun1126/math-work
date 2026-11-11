@@ -42,6 +42,12 @@ _LEAD_WORD = re.compile(
 # 题号/序号前缀：①②、(1)、1.、"步骤2："
 _ENUM = re.compile(r"^\s*(?:[①②③④⑤⑥⑦⑧⑨⑩]|[（(]\s*\d+\s*[)）]|\d+\s*[.、)）:：])\s*")
 
+# 设元行的引导词：「设 y=kx」「令 k=y/x」「不妨设 y=kx」。
+# 这类行不是推导的一步，是**换了未知数**——后面的式子跟原题不在一个论域里，
+# 拿原题条件去比必然"对不上"。齐次方程用设比值法解，整条正确过程会因此
+# 从这一行起全判 ✗。所以先认出来，不硬判。
+_DECLARE_LEAD = re.compile(r"^(?:不妨设|假设|设|令|取)")
+
 # 学生写的"得分点"类型，用于给这一步贴标签（只展示，不参与判定）
 _ACTIONS: list[tuple[str, str]] = [
     ("移项", "移项"),
@@ -774,6 +780,31 @@ def _pair_same(a, b) -> bool:
         return False
 
 
+def _mark_declares(items: list[_Line], ppe) -> tuple[set[int], set]:
+    """挑出「设了新符号」的行，返回 (这些行的序号, 新符号集合)。
+
+    只认真正引入**题面没有的符号**的行：`设 y=kx` 的 k 是新的，算；
+    `设 x=2` 只是给原变量赋值，本来就是正常的一步，不算。
+
+    为什么要单独认：设元之后的式子（`x²+2kx²+k²x²=0`、`1+2k+k²=0`）跟原题
+    不在同一个论域里，拿原题条件验算必然"对不上"。这不是学生写错了，是
+    批改这边换了参照系——按项目那条"识别有把握才判错"，这里必须标待确认。
+    """
+    known = _symbols_of(_pairs_of(ppe))
+    ids: set[int] = set()
+    fresh: set = set()
+    for it in items:
+        if it.pe is None or not it.pe.ok:
+            continue
+        if not _DECLARE_LEAD.match((it.text or "").strip()):
+            continue
+        new = _symbols_of(_pairs_of(it.pe)) - known
+        if new:
+            ids.add(it.idx)
+            fresh |= new
+    return ids, fresh
+
+
 def _looks_like_system(items, ppe) -> bool:
     """这一段是在解方程组，还是解单方程。
 
@@ -1064,6 +1095,9 @@ def grade(
     res.problem = res.problem or (ppe.normalized if ppe.ok else "")
     res.problem_ok = True
 
+    # 先认出"设了新符号"的行。它们和原题不在一个论域，不能拿去跟题面比。
+    declare_ids, introduced = _mark_declares(items, ppe)
+
     # 题面单独给了的话，过程里那一行还没被认出来。不标出来，它会显示成
     # "第一处推导，没有上一步可比"——把题面说成推导，整张表就看着像错的。
     #
@@ -1119,6 +1153,16 @@ def grade(
             base = it
             continue
 
+        if it.idx in declare_ids:
+            names = "、".join(sorted(s.name for s in introduced))
+            it.verdict = "unknown"
+            it.reason = (
+                f"这里设了新符号 {names}，等于换了个未知数往下算。"
+                "系统的验算都以原题条件为准，这一段不硬判"
+            )
+            it.row = ["待确认", f"设了 {names}"]
+            continue
+
         if it.kind == "prose":
             it.verdict = "note"
             it.reason = "说明行，不参与验算"
@@ -1129,6 +1173,15 @@ def grade(
             it.verdict = "unknown"
             it.reason = "这一行读不出算式，跳过"
             it.row = ["读不出", "跳过"]
+            continue
+
+        # 用了新设符号的行（`1+2k+k²=0`、`k=-1`）：只有换回原题变量才谈得上验算。
+        # 这里不判错，也不让它当基准——否则下一行会拿"含 k 的式子"跟它比，
+        # 又冒出一串假错。
+        if introduced and (_symbols_of(_pairs_of(it.pe)) & introduced):
+            it.verdict = "unknown"
+            it.reason = "这一步用的是新设的符号，系统的验算都以原题变量为准，这里不硬判"
+            it.row = ["待确认", "含新设符号"]
             continue
 
         if it.kind == "assign":
@@ -1281,7 +1334,16 @@ def grade(
             )
         elif covered:
             res.grade = "pass"
-            if inferred_answer:
+            if declare_ids:
+                # 结论对、中间没验，这两件事必须分开说。
+                # 只写"过程逐行成立"是假的：换元那几行系统根本没看。
+                where = "、".join(str(i) for i in sorted(declare_ids))
+                res.headline = f"换回原变量后的结论成立；设元那一段（第 {where} 步起）没有验算"
+                res.advice = (
+                    "设元等于换了个未知数，那几行的代数变换系统不比——它只认原题里的变量。"
+                    "系统能保证的是最后换回来的结论跟原题一致，中间 k 算得对不对要自己再看一遍。"
+                )
+            elif inferred_answer:
                 # 学生根本没写答案，是他从最后一行式子解出来的。说「答案也对」
                 # 是把系统补的东西算到学生头上，这种便宜不能占（评测 C03）。
                 res.headline = "过程逐行成立；答案没单独写，按最后一行式子解出的解集与标准解一致"
@@ -1307,6 +1369,16 @@ def grade(
 
     if sr.ok and sr.steps:
         res.notes.append("标准解法见下方「正确做法」，那是独立求出来的，不依赖学生的过程")
+
+    # 设元那一段没验算，得说出来。不说的话，表格里几行"待确认"会让人
+    # 以为系统坏了；说清楚是"换了未知数、坐标系变了"，才知道怎么看这张表。
+    if declare_ids:
+        names = "、".join(sorted(s.name for s in introduced))
+        where = "、".join(str(i) for i in sorted(declare_ids))
+        res.notes.append(
+            f"第 {where} 步设了新符号 {names}，之后换元得到的式子跟原题不在同一个"
+            "未知数里，这一段没有验算；换回原变量之后的结论仍然照常判。"
+        )
 
     # 第一步错之后，后面每一步即使"局部成立"也不能说明结论可靠。
     # 不标出来的话，表格里一片 ✓ 会让人以为只有一处小错。

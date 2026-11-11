@@ -29,7 +29,7 @@ from sympy import Poly, Symbol
 
 from . import config
 from .cache import Cache
-from .latex import parse, to_latex
+from .latex import canonical_env, parse, to_latex
 from .solve import solve as solve_parsed
 from .solve import summary as solve_summary
 from .types import ParsedExpr, SolveResult
@@ -70,7 +70,7 @@ _UNKNOWN_NAMES = ("x", "y", "z")
 
 # 缓存版本号。判据一改就必须升版本，否则会拿旧结论回答新问题——
 # 这种错最隐蔽：结果看起来正常，只是它是上一版算法算的。
-CACHE_VERSION = "eq-answer-v4"  # v4：三元方程组改为消元法分步，旧缓存的步骤得作废
+CACHE_VERSION = "eq-answer-v5"  # v5：解析层能读 aligned/带逗号 cases，题面归一结果变了
 
 _CJK = re.compile(r"[\u4e00-\u9fff]+")
 _TEXTLABEL = re.compile(r"\\text\{[^{}]*\}")
@@ -233,6 +233,8 @@ def classify(pe: ParsedExpr) -> Topic:
 # ---------------------------------------------------------------- 题目抽取
 
 
+
+
 def _pieces(text: str) -> list[str]:
     """把题干切成"数学片段"，中文和中文标点当分隔符。
 
@@ -265,7 +267,7 @@ def _split_multi(piece: str) -> list[str]:
 def find_equations(text: str) -> list[str]:
     """从题干里抽出所有能解析的方程，按出现顺序。"""
     out: list[str] = []
-    for piece in _pieces(_INSTRUCTION.sub(" ", (text or "").strip())):
+    for piece in _pieces(_INSTRUCTION.sub(" ", canonical_env(text))):
         for sub in _split_multi(piece):
             if parse(sub).ok:
                 out.append(sub)

@@ -230,7 +230,52 @@ def _via_sympy_parse_latex(s: str):
 _CASES = re.compile(r"\\begin\{cases\}(.*?)\\end\{cases\}", re.S)
 
 
+_ENV = re.compile(
+    r"\\begin\{(alignedat|aligned|array|split|gathered|cases)\}"
+    r"(?:\{[^{}]*\})?(.*?)\\end\{\1\}",
+    re.S,
+)
+
+# 题号：`1) x+y=6`、`（2）x=3`、`3. x=1`。
+#
+# 不剥的话，`1)` 里的 1 会和等号右边的数配成一个式子——
+# `1)\left\{\begin{aligned}x+y&=6` 会被读成 `1=6`，还报 ok=True。
+# 假成功比报错难查得多。
+#
+# 判据必须带上标点：只写 `^\d+` 会把 `2x+3=5` 剥成 `x+3=5`，
+# 加上 `(?!\d)` 是为了别把 `2.5x` 的小数点当成题号的分隔点。
+_ENV_ENUM = re.compile(r"^\s*(?:[(（]\s*\d+\s*[)）]|\d+\s*[)）.、](?!\d))\s*")
+
+
+def canonical_env(text: str) -> str:
+    """把「一个环境里装多条方程」的各种写法规整成标准 ``cases``。
+
+    模型读方程组不只用 ``cases``：``aligned`` / ``array`` / ``split`` /
+    ``gathered`` 都遇到过。这些环境里的 ``\\\\`` 是**排版换行**，不是方程之间的
+    分隔符，可它装的确实是好几条方程。不捋平的话，换一种写法就"读不出来"，
+    而投票层看到全部候选失败，会给出"没认准"——其实每个模型都读对了。
+
+    只动结构，不动数学内容：剥题号、按排版换行拆行、去掉对齐符 ``&``、
+    去掉行末逗号句号。凑不出两条就原样返回，不改单条式子的写法。
+    """
+    s = _ENV_ENUM.sub("", (text or "").strip())
+    m = _ENV.search(s)
+    if not m:
+        return s
+
+    rows: list[str] = []
+    for row in re.split(r"\\\\", m.group(2)):
+        row = row.replace("&", "").strip(" \t,，;；")
+        row = re.sub(r"[.。]$", "", row).strip()
+        if "=" in row:
+            rows.append(row)
+    if len(rows) < 2:
+        return s
+    return "\\begin{cases}" + "\\\\".join(rows) + "\\end{cases}"
+
+
 def parse(latex: str) -> ParsedExpr:
+    latex = canonical_env(latex)
     norm = normalize(latex)
     pe = ParsedExpr(latex=latex, normalized=norm, kind="unknown")
     if not norm:
