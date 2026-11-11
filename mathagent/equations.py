@@ -43,6 +43,9 @@ COVERED = {
     "system": "二元一次方程组",
 }
 
+# 方程组标题里的元数用中文，读起来像教辅而不像日志。
+_CN_NUM = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六"}
+
 # 能算，但要多说一句的：答案对，边界要交代。
 EDGE = {
     "rational": "分式方程（自动验增根）",
@@ -67,7 +70,7 @@ _UNKNOWN_NAMES = ("x", "y", "z")
 
 # 缓存版本号。判据一改就必须升版本，否则会拿旧结论回答新问题——
 # 这种错最隐蔽：结果看起来正常，只是它是上一版算法算的。
-CACHE_VERSION = "eq-answer-v3"  # v3：步骤里去掉"代回验证 0 = 0"，旧缓存的步骤得作废
+CACHE_VERSION = "eq-answer-v4"  # v4：三元方程组改为消元法分步，旧缓存的步骤得作废
 
 _CJK = re.compile(r"[\u4e00-\u9fff]+")
 _TEXTLABEL = re.compile(r"\\text\{[^{}]*\}")
@@ -146,7 +149,10 @@ def classify(pe: ParsedExpr) -> Topic:
         if not linear:
             return Topic("nonlinear-system", OUT["nonlinear-system"], "out", -1, vars_,
                          "方程组里有二次项，解可能不止一组，本工具不判")
-        return Topic("system", COVERED["system"], "in", 1, vars_, "")
+        # 标签按实际未知数个数走。原来写死"二元"，三元题也被叫成二元，
+        # 学生一看标题就知道工具没看懂他的题。
+        label = f"{_CN_NUM.get(len(vars_), str(len(vars_)))}元一次方程组"
+        return Topic("system", label, "in", 1, vars_, "")
 
     if pe.kind != "equation":
         return Topic("not-equation", OUT["not-equation"], "out", -1, [],
@@ -514,6 +520,266 @@ def _lin_show(expr, var) -> str:
         return f"{to_latex(sympy.expand(expr))} = 0"
 
 
+def _sys3_show(e, v1, v2) -> str:
+    """把消元后剩下的二元式子写成 `A x + B y = C`。
+
+    首项是负的读起来别扭（"- x + y = 1"），两边同乘 -1 再写，等式照样成立。
+    """
+    p = Poly(sympy.expand(e), v1, v2)
+    a = p.coeff_monomial(v1)
+    b = p.coeff_monomial(v2)
+    c = p.coeff_monomial(1)
+    if a.is_negative or (a == 0 and b.is_negative):
+        a, b, c = -a, -b, -c
+    return f"{to_latex(sympy.expand(a * v1 + b * v2))} = {to_latex(sympy.expand(-c))}"
+
+
+def _system_steps3(pairs, syms) -> list[dict]:
+    """三元一次方程组：老老实实走消元法，三元 → 二元 → 一元。
+
+    和二元版同一个理由：CAS 只会给「解得 (1,2,3)」，而三元方程组要学的
+    恰恰是那两次消元。直接跳到答案，等于把题目最有价值的部分删掉。
+
+    路线固定为教材的写法——挑一个三个式子都有的未知数，两两消去它，
+    得到两个二元方程；二元那两个再交给 `_system_steps` 按它自己的
+    代入/加减逻辑处理。这样三元不需要另写一套解二元的方法。
+
+    挑不出干净路线（某式子缺项、消完退化成只有一个未知数）就返回空，
+    退回通用步骤，不硬编。
+    """
+    if len(pairs) != 3 or len(syms) != 3:
+        return []
+
+    num = ["①", "②", "③"]
+    try:
+        exprs = [sympy.expand(lhs - rhs) for lhs, rhs in pairs]
+        rows = []
+        for e in exprs:
+            p = Poly(e, *syms)
+            rows.append([p.coeff_monomial(v) for v in syms] + [-p.coeff_monomial(1)])
+    except Exception:  # noqa: BLE001
+        return []
+
+    # 先消哪个未知数：教材习惯从 z（最后一个）开始，缺项就往前退。
+    # 优先挑三条里都有的（两两相消最顺），没有再退到"至少有两条式子含它"。
+    # 后者是"三角和"那类题——每个未知数只出现在两条式子里，
+    # 直接要求三条齐全会把它们全判出局，整题退回机器步骤。
+    k = None
+    for want in (3, 2):
+        for cand in (2, 1, 0):
+            if sum(1 for r in rows if r[cand] != 0) == want:
+                k = cand
+                break
+        if k is not None:
+            break
+    if k is None:
+        return []
+    extra = syms[k]
+    rest = [v for i, v in enumerate(syms) if i != k]
+
+    def cancel(i: int, j: int):
+        """消去 extra，返回 (剩余式子, 这一步怎么做的)。
+
+        有一条式子本来就不含 extra 时返回 None：系数为 0 的交叉相乘会退化成
+        "原样抄一条式子"，看着像消元，其实什么都没消。三角和那类题
+        （x+y=3, y+z=5, x+z=4）每个变量只出现在两条式子里，最容易踩这个坑。
+        """
+        ci, cj = rows[i][k], rows[j][k]
+        if ci == 0 or cj == 0:
+            return None, ""
+        if ci == cj:
+            return sympy.expand(exprs[i] - exprs[j]), f"{num[i]}式 − {num[j]}式"
+        if ci == -cj:
+            return sympy.expand(exprs[i] + exprs[j]), f"{num[i]}式 + {num[j]}式"
+        # 系数对不上就两边各乘一个数凑齐，正系数写在前面，读起来顺
+        m1, m2 = abs(cj), abs(ci)
+        e = sympy.expand(exprs[i] * cj - exprs[j] * ci)
+        return e, f"{num[i]}式×{m1} − {num[j]}式×{m2}"
+
+    def coeff(e, v):
+        # 必须拿全部三个符号当多项式变量：只传 rest 的话，含 extra 的式子
+        # （比如 y+z-5 里的 z）会让 Poly 直接抛异常，被当成"系数为 0"，
+        # 于是"找一条含 z 的式子回代"永远找不到。
+        try:
+            return Poly(sympy.expand(e), *syms).coeff_monomial(v)
+        except Exception:  # noqa: BLE001
+            return sympy.Integer(0)
+
+    def single_root(e, v):
+        """e = 0 解出唯一的 v。解不出、或解不唯一，这条式子就不能用。"""
+        try:
+            roots = sympy.solve(sympy.expand(e), v)
+        except Exception:  # noqa: BLE001
+            return None
+        return sympy.nsimplify(roots[0]) if len(roots) == 1 else None
+
+    # 三个式子两两消元，得到三条"少了一个未知数"的式子。它们不会都剩两个字母：
+    # x+y+z=6 减去 x-y+z=2，x 和 z 一起没了，直接就是 2y-4=0——那是最好走的一步。
+    # 早先这里要求"剩下的两个未知数都还在"，于是把这种最好走的路当退化丢掉，
+    # 整道三元题退回机器步骤，正是这个判据太窄。
+    two: list[tuple] = []   # 消完还剩两个未知数
+    one: list[tuple] = []   # 消完只剩一个未知数，一步就能定住它
+    for i, j in ((0, 1), (0, 2), (1, 2)):
+        e, how = cancel(i, j)
+        if e is None:
+            continue
+        alive = [v for v in rest if coeff(e, v) != 0]
+        if len(alive) == 2:
+            two.append((e, how, i, j))
+        elif len(alive) == 1:
+            one.append((e, how, alive[0]))
+
+    # 消元只凑出一条式子时（被消的变量只出现在两条式子里），
+    # 原式中"本来就没有它、只剩另外两个字母"的那条，可以直接当第二条用。
+    # 三角和那类题（x+y=3, y+z=5, x+z=4）走的就是这条路。
+    if len(two) == 1 and not one:
+        for idx, e in enumerate(exprs):
+            if coeff(e, extra) != 0:
+                continue
+            alive = [v for v in rest if coeff(e, v) != 0]
+            if len(alive) == 2:
+                two.append(
+                    (sympy.expand(e), f"{num[idx]}式里本来就没有 {to_latex(extra)}", idx, idx)
+                )
+                break
+
+    if not two and len(one) < 2:
+        return []
+
+    steps: list[dict] = [
+        {
+            "title": "题目给的三个条件（①②③）",
+            "latex": rf"{to_latex(pairs[0][0])} = {to_latex(pairs[0][1])} \quad ①"
+                     rf"\qquad {to_latex(pairs[1][0])} = {to_latex(pairs[1][1])} \quad ②"
+                     rf"\qquad {to_latex(pairs[2][0])} = {to_latex(pairs[2][1])} \quad ③",
+        },
+    ]
+    known: dict = {}
+
+    # 第一步：能一步定住一个未知数的先定住。这种式子是白捡的，别绕远路。
+    for e, how, v in one:
+        if v in known or len(known) >= 2:
+            continue
+        val = single_root(e, v)
+        if val is None:
+            continue
+        known[v] = val
+        gone = next((u for u in rest if u != v), None)
+        what = f"{to_latex(extra)} 和 {to_latex(gone)}" if gone is not None else to_latex(extra)
+        steps.append(
+            {
+                "title": f"{how}，{what} 一起抵消了",
+                "latex": f"{to_latex(sympy.expand(e))} = 0 \\quad\\Rightarrow\\quad "
+                         f"{to_latex(v)} = {to_latex(val)}",
+            }
+        )
+
+    missing = [v for v in rest if v not in known]
+
+    # 第二步：还差一个，就拿一条剩两个未知数的式子，把已求出的代进去。
+    if len(missing) == 1 and two:
+        v = missing[0]
+        for e, how, i, j in two:
+            sub = sympy.expand(e.subs(known))
+            val = single_root(sub, v)
+            if val is None:
+                continue
+            known[v] = val
+            steps.append(
+                {
+                    "title": f"把已知的数代进 {how} 得到的式子，求 {to_latex(v)}",
+                    "latex": f"{to_latex(sub)} = 0 \\quad\\Rightarrow\\quad "
+                             f"{to_latex(v)} = {to_latex(val)}",
+                }
+            )
+            break
+        missing = [v for v in rest if v not in known]
+
+    # 第三步：两个都没定住，两条剩两个未知数的式子联立，交给二元那套逻辑。
+    if len(missing) == 2 and len(two) >= 2:
+        e1, how1, _, _ = two[0]
+        e2, how2, _, _ = two[1]
+        p1 = Poly(sympy.expand(e1), *rest)
+        p2 = Poly(sympy.expand(e2), *rest)
+        l1 = sympy.expand(p1.coeff_monomial(rest[0]) * rest[0]
+                          + p1.coeff_monomial(rest[1]) * rest[1])
+        l2 = sympy.expand(p2.coeff_monomial(rest[0]) * rest[0]
+                          + p2.coeff_monomial(rest[1]) * rest[1])
+        r1 = sympy.expand(-p1.coeff_monomial(1))
+        r2 = sympy.expand(-p2.coeff_monomial(1))
+        steps.append({"title": f"先消掉 {to_latex(extra)}：{how1}",
+                      "latex": f"{_sys3_show(e1, *rest)} \\quad ④"})
+        steps.append({"title": f"再消一次 {to_latex(extra)}：{how2}",
+                      "latex": f"{_sys3_show(e2, *rest)} \\quad ⑤"})
+        sub_steps = _system_steps([(l1, r1), (l2, r2)], rest)
+        if sub_steps:
+            for st in sub_steps[1:]:
+                # 二元那套自己带一条"代回④⑤检查"，最后还有一条三个式子的总检查，
+                # 连着两条"检查"会让人以为出了问题。
+                if st["title"].startswith("检查"):
+                    continue
+                steps.append(
+                    {
+                        "title": st["title"].replace("①", "④").replace("②", "⑤"),
+                        "latex": st["latex"],
+                    }
+                )
+        else:
+            steps.append(
+                {
+                    "title": "④⑤联立，解这个二元方程组",
+                    "latex": f"{to_latex(l1)} = {to_latex(r1)} \\quad "
+                             f"{to_latex(l2)} = {to_latex(r2)}",
+                }
+            )
+        try:
+            sol = sympy.solve([l1 - r1, l2 - r2], rest, dict=True)
+            sol = sol[0] if sol else {}
+        except Exception:  # noqa: BLE001
+            return []
+        for v in rest:
+            if sol.get(v) is not None:
+                known[v] = sympy.nsimplify(sol[v])
+
+    if len(known) < 2:
+        return []
+
+    # 两个未知数都定了，代回一条**含 extra 的**原式求最后那个。
+    # 不能随手拿 ①：三角和那类题里 ① 根本没有 z，代进去恒等于 0，解不出东西。
+    idx_back = next((i for i, e in enumerate(exprs) if coeff(e, extra) != 0), None)
+    if idx_back is None:
+        return []
+    try:
+        back = sympy.solve(sympy.expand(exprs[idx_back].subs(known)), extra)
+        if len(back) != 1:
+            return []
+        v3 = sympy.nsimplify(back[0])
+    except Exception:  # noqa: BLE001
+        return []
+
+    steps.append(
+        {
+            "title": f"把 {to_latex(rest[0])} 和 {to_latex(rest[1])} 代回 {num[idx_back]} 式，"
+                     f"求 {to_latex(extra)}",
+            "latex": f"{to_latex(extra)} = {to_latex(v3)}",
+        }
+    )
+
+    got = {**known, extra: v3}
+    try:
+        ok = all(sympy.simplify(e.subs(got)) == 0 for e in exprs)
+    except Exception:  # noqa: BLE001
+        ok = False
+    steps.append(
+        {
+            "title": "检查：把三个数分别代回 ①②③",
+            "latex": r"\text{三个方程左右两边都相等，答案成立}" if ok
+                     else r"\text{代回去有一个式子不成立，这组数需要再核对}",
+        }
+    )
+    return steps
+
+
 def _system_steps(pairs, syms) -> list[dict]:
     """二元一次方程组的解法，写成初中生看得懂的几步。
 
@@ -528,6 +794,8 @@ def _system_steps(pairs, syms) -> list[dict]:
     挑不出干净路线的（要两边乘系数那种），返回空，宁可退回通用步骤也不硬编。
     中间每一步都是真算出来的，不是套话。
     """
+    if len(pairs) == 3 and len(syms) == 3:
+        return _system_steps3(pairs, syms)
     if len(pairs) != 2 or len(syms) != 2:
         return []
     x, y = syms
@@ -682,7 +950,7 @@ def _system_steps(pairs, syms) -> list[dict]:
     return [
         cond,
         {
-            "title": f"①式 {word} ②式：{to_latex(gone)} 这一项正好抵消",
+            "title": f"①式{word}②式：{to_latex(gone)} 这一项正好抵消",
             "latex": rf"{_lin_show(mid, alone)} \quad\Rightarrow\quad "
                      f"{to_latex(alone)} = {to_latex(val)}",
         },
