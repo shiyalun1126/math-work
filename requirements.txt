@@ -1,0 +1,29 @@
+# 运行时依赖（Python 3.12，解释器 F:/PyCharm/python.exe）
+# 安装：F:/PyCharm/python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+
+numpy>=2.0
+Pillow>=10.0
+sympy>=1.13
+
+# 结构层：LaTeX -> 语法树
+latex2sympy2>=1.9.1
+
+# 云端感知（HTTP 调用）
+requests>=2.31
+
+# 读 .env 里的密钥
+python-dotenv>=1.0
+
+# 界面
+gradio>=4.0
+
+# ---- 以下按需安装，不装也能跑云端路线 ----
+
+# 本地兜底感知（PaddleOCR-VL 0.9B），约 2GB 显存
+# paddlepaddle-gpu==3.0.0
+# paddleocr>=3.3
+
+# 本地微调（可选，8GB 显存走 QLoRA）
+# torch --index-url https://download.pytorch.org/whl/cu124
+# transformers>=4.55
+# peft accelerate bitsandbytes

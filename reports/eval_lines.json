@@ -1,0 +1,86 @@
+{
+  "generated": "2026-11-11 08:31:11",
+  "dataset": "M²E (Wente47/M2E, ModelScope)",
+  "license": "CC BY-NC 4.0",
+  "split": "test",
+  "params": {
+    "deskew": false,
+    "threshold_ratio": 0.03,
+    "min_gap_ratio": 0.004,
+    "min_height": 6
+  },
+  "params_source": "reports\\line_params.json",
+  "n_blocks": 500,
+  "skipped_align": 0,
+  "missing": [],
+  "errors": [],
+  "image_name_collisions": 0,
+  "caveats": [
+    "外部验证集：M²E (Wente47 / ModelScope)，CC BY-NC 4.0，非本项目自采数据，指标须与 self_test 分表报告。",
+    "M²E 是多行公式块，不是学生整页解题过程；没有对错/错因标注，不能当批改评测集。",
+    "只比对行数，不比对行框位置：exact 高不等于每行内容都切对，需配合 --debug 目检。",
+    "默认纳入含 \\t 的竖式对齐块（M²E 中占多数，全跳过会让样本失去代表性），按 align 分层报；--exclude-align 可排除。",
+    "M²E 图多为 70~300 px 的紧凑小图，与整页作业照不是同一分布；这里的数字不能外推成产品对整页作业的切行准确率。"
+  ],
+  "metrics": {
+    "n": 500,
+    "exact": {
+      "n": 500,
+      "hit": 122,
+      "value": 0.244,
+      "ci": [
+        0.206,
+        0.28
+      ]
+    },
+    "within1": {
+      "n": 500,
+      "hit": 247,
+      "value": 0.494,
+      "ci": [
+        0.45,
+        0.54
+      ]
+    },
+    "mae": 1.802,
+    "bias": -1.146,
+    "over": 0.156,
+    "under": 0.6,
+    "by_group": {
+      "1-2 行": {
+        "n": 75,
+        "hit": 39,
+        "value": 0.52
+      },
+      "3 行": {
+        "n": 144,
+        "hit": 36,
+        "value": 0.25
+      },
+      "4 行": {
+        "n": 131,
+        "hit": 33,
+        "value": 0.25190839694656486
+      },
+      "5 行及以上": {
+        "n": 150,
+        "hit": 14,
+        "value": 0.09333333333333334
+      }
+    },
+    "by_align": {
+      "普通": {
+        "n": 115,
+        "hit": 45,
+        "value": 0.391304347826087
+      },
+      "竖式对齐": {
+        "n": 385,
+        "hit": 77,
+        "value": 0.2
+      }
+    }
+  },
+  "tune": null,
+  "reproduce": "F:/PyCharm/python.exe eval/run_line_eval.py --split test --params reports/line_params.json --limit 500"
+}

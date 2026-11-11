@@ -1,0 +1,149 @@
+{
+ "plain_seeded": 8,
+ "pages": [
+  {
+   "id": "W01",
+   "before": {
+    "w": 810,
+    "h": 1440,
+    "kb": 39.0,
+    "contrast": 137.0,
+    "sharpness": 1.48
+   },
+   "after": {
+    "w": 810,
+    "h": 1440,
+    "kb": 125.0,
+    "contrast": 229.0,
+    "sharpness": 3.02
+   },
+   "gain_sharpness": 1.54
+  },
+  {
+   "id": "W04",
+   "before": {
+    "w": 810,
+    "h": 1440,
+    "kb": 44.8,
+    "contrast": 81.0,
+    "sharpness": 1.8
+   },
+   "after": {
+    "w": 810,
+    "h": 1440,
+    "kb": 241.9,
+    "contrast": 221.0,
+    "sharpness": 7.39
+   },
+   "gain_sharpness": 5.59
+  },
+  {
+   "id": "W05",
+   "before": {
+    "w": 810,
+    "h": 1440,
+    "kb": 51.2,
+    "contrast": 47.0,
+    "sharpness": 2.5
+   },
+   "after": {
+    "w": 810,
+    "h": 1440,
+    "kb": 172.3,
+    "contrast": 79.0,
+    "sharpness": 5.54
+   },
+   "gain_sharpness": 3.04
+  },
+  {
+   "id": "W08",
+   "before": {
+    "w": 810,
+    "h": 1440,
+    "kb": 39.1,
+    "contrast": 54.0,
+    "sharpness": 1.57
+   },
+   "after": {
+    "w": 810,
+    "h": 1440,
+    "kb": 163.1,
+    "contrast": 136.0,
+    "sharpness": 4.64
+   },
+   "gain_sharpness": 3.07
+  },
+  {
+   "id": "W12",
+   "before": {
+    "w": 1080,
+    "h": 637,
+    "kb": 25.7,
+    "contrast": 37.0,
+    "sharpness": 1.68
+   },
+   "after": {
+    "w": 1080,
+    "h": 637,
+    "kb": 84.5,
+    "contrast": 48.0,
+    "sharpness": 4.0
+   },
+   "gain_sharpness": 2.32
+  },
+  {
+   "id": "W13",
+   "before": {
+    "w": 810,
+    "h": 1440,
+    "kb": 35.3,
+    "contrast": 86.0,
+    "sharpness": 1.07
+   },
+   "after": {
+    "w": 810,
+    "h": 1440,
+    "kb": 271.3,
+    "contrast": 133.0,
+    "sharpness": 6.19
+   },
+   "gain_sharpness": 5.12
+  },
+  {
+   "id": "W16",
+   "before": {
+    "w": 1080,
+    "h": 810,
+    "kb": 58.5,
+    "contrast": 118.0,
+    "sharpness": 3.8
+   },
+   "after": {
+    "w": 1080,
+    "h": 810,
+    "kb": 171.1,
+    "contrast": 246.0,
+    "sharpness": 6.95
+   },
+   "gain_sharpness": 3.15
+  },
+  {
+   "id": "W17",
+   "before": {
+    "w": 1080,
+    "h": 908,
+    "kb": 36.2,
+    "contrast": 65.0,
+    "sharpness": 1.78
+   },
+   "after": {
+    "w": 1080,
+    "h": 908,
+    "kb": 136.7,
+    "contrast": 65.0,
+    "sharpness": 4.38
+   },
+   "gain_sharpness": 2.6
+  }
+ ]
+}

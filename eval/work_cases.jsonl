@@ -1,0 +1,40 @@
+{"id":"A01","group":"正常与一题多解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n(x-2)(x-3)=0\nx=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"最标准的因式分解路径"}
+{"id":"A02","group":"正常与一题多解","problem":"x^2-4x+3=0","work":"x^2-4x+3=0\nx^2-4x=-3\nx^2-4x+4=1\n(x-2)^2=1\nx=1 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"配方法，路径与标准因式分解完全不同，不应被误判"}
+{"id":"A03","group":"正常与一题多解","problem":"2x-6=12","work":"2x-6=12\n2x=18\nx=9","grade":"pass","first_error":-1,"error_type":"","note":"一元一次，移项合并"}
+{"id":"A04","group":"正常与一题多解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n2x^2-10x+12=0\n(x-2)(x-3)=0\nx=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"两边同乘 2，解集不变"}
+{"id":"A05","group":"正常与一题多解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n两边同乘2得 2x^2-10x+12=0\n所以 (x-2)(x-3)=0\nx=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"式子中夹人话，叙述行不参与判定"}
+{"id":"A06","group":"正常与一题多解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n(x-2)(x-3)=0\nx=3 或 x=2","grade":"pass","first_error":-1,"error_type":"","note":"答案顺序反过来，解集相同"}
+{"id":"A07","group":"正常与一题多解","problem":"3x+1=7","work":"3x+1=7\n3x=6\nx=2","grade":"pass","first_error":-1,"error_type":"","note":"一次方程"}
+{"id":"A08","group":"正常与一题多解","problem":"2(x+1)=6","work":"2(x+1)=6\n2x+2=6\n2x=4\nx=2","grade":"pass","first_error":-1,"error_type":"","note":"先展开再移项"}
+{"id":"A09","group":"正常与一题多解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\nx=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"跳步不扣分：相邻两式同解即放过"}
+{"id":"A10","group":"正常与一题多解","problem":"3x+1=7","work":"3x+1=7\nx=2","grade":"pass","first_error":-1,"error_type":"","note":"直接写答案，无中间过程"}
+{"id":"A11","group":"正常与一题多解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n两边同乘3得 2x^2-10x+12=0\n(x-2)(x-3)=0\nx=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"声明的操作与式子对不上，但式子本身同解；推断是启发式的，不能拿它否定学生"}
+{"id":"A12","group":"正常与一题多解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\nx^2-5x=-6\nx(x-5)=-6\nx=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"移项后换一种写法，局部有效性应放过"}
+{"id":"B01","group":"伪推导","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\nx^2-6=5x\nx^2-5x=6\nx=2 或 x=3","grade":"fake","first_error":2,"error_type":"伪推导","note":"经典伪推导：第 2 行不成立，后面改回，答案对"}
+{"id":"B02","group":"伪推导","problem":"2x-6=12","work":"2x-6=12\n2x=12\n2x=18\nx=9","grade":"fake","first_error":2,"error_type":"伪推导","note":"中间抄错又改回，答案对"}
+{"id":"B03","group":"伪推导","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\nx^2+5x+6=0\nx=2 或 x=3","grade":"fake","first_error":2,"error_type":"伪推导","note":"符号抄反，答案仍写对"}
+{"id":"B04","group":"伪推导","problem":"3x+1=7","work":"3x+1=7\n3x=5\n3x=6\nx=2","grade":"fake","first_error":2,"error_type":"伪推导","note":"一次方程版：错一步再改回"}
+{"id":"B05","group":"伪推导","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\nx^2-5x+7=0\nx^2-5x=6\nx=2 或 x=3","grade":"fake","first_error":2,"error_type":"伪推导","note":"常数抄错，第 3 行又改回题面"}
+{"id":"B06","group":"伪推导","problem":"2x-6=12","work":"2x-6=12\n2x-6=10\n2x=18\nx=9","grade":"fake","first_error":2,"error_type":"伪推导","note":"右边抄错，后面按正确的题面继续算"}
+{"id":"B07","group":"伪推导","problem":"x^2-4x+3=0","work":"x^2-4x+3=0\nx^2-4x=3\nx^2-4x=-3\nx=1 或 x=3","grade":"fake","first_error":2,"error_type":"伪推导","note":"移项符号错，下一步改回"}
+{"id":"B08","group":"伪推导","problem":"3x+1=7","work":"3x+1=7\n3x=6\n3x=7\n3x=6\nx=2","grade":"fake","first_error":3,"error_type":"伪推导","note":"中间插入一行错的又改回，首错在第 3 行"}
+{"id":"C01","group":"漏解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n(x-2)(x-3)=0\nx=2","grade":"partial","first_error":-1,"error_type":"漏解","note":"只写一个根"}
+{"id":"C02","group":"漏解","problem":"x^2=4","work":"x^2=4\nx=2","grade":"partial","first_error":-1,"error_type":"漏解","note":"开方漏负根"}
+{"id":"C03","group":"版式与叙述","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n(x-2)(x-3)=0","grade":"pass","first_error":-1,"error_type":"","note":"口径裁定：最后一行式子已给出完整解集，系统明确披露按它读解，不算漏解（见报告 §8）"}
+{"id":"C04","group":"漏解","problem":"x^2=x","work":"x^2=x\nx=1","grade":"partial","first_error":-1,"error_type":"漏解","note":"两边约去 x，丢掉 x=0"}
+{"id":"C05","group":"漏解","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n(x-2)(x-3)=0\nx=3","grade":"partial","first_error":-1,"error_type":"漏解","note":"只写另一个根"}
+{"id":"C06","group":"漏解","problem":"x^2-4x+3=0","work":"x^2-4x+3=0\n(x-1)(x-3)=0\nx=1","grade":"partial","first_error":-1,"error_type":"漏解","note":"另一题只写一个根"}
+{"id":"D01","group":"明显错","problem":"2x-6=12","work":"2x-6=12\n2x=12\nx=6","grade":"wrong","first_error":2,"error_type":"移项/变号错","note":"移项漏加 6，答案跟着错"}
+{"id":"D02","group":"明显错","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\nx=5","grade":"wrong","first_error":2,"error_type":"答案错","note":"答案代不回原式"}
+{"id":"D03","group":"明显错","problem":"3x+1=7","work":"3x+1=7\n3x=6\nx=3","grade":"wrong","first_error":3,"error_type":"答案错","note":"最后一步除错"}
+{"id":"D04","group":"明显错","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\nx=2 或 x=3 或 x=4","grade":"wrong","first_error":-1,"error_type":"答案错","note":"多写一个不存在的根"}
+{"id":"D05","group":"明显错","problem":"2x-6=12","work":"2x-6=12\n2x=8\nx=4","grade":"wrong","first_error":2,"error_type":"移项/变号错","note":"移项做成减法"}
+{"id":"D06","group":"明显错","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n(x-2)(x-3)=0\nx=1 或 x=4","grade":"wrong","first_error":3,"error_type":"答案错","note":"过程对，答案抄错"}
+{"id":"D07","group":"明显错","problem":"3x+1=7","work":"3x+1=7\n3x=5\nx=5","grade":"wrong","first_error":2,"error_type":"移项/变号错","note":"移项错，答案也错"}
+{"id":"D08","group":"明显错","problem":"x^2-4x+3=0","work":"x^2-4x+3=0\n(x-1)(x-3)=0\nx=1 或 x=2","grade":"wrong","first_error":3,"error_type":"答案错","note":"第二个根写错"}
+{"id":"E01","group":"无法判定","problem":"","work":"这道题我不会","grade":"gap","first_error":-1,"error_type":"","note":"整段没有可验算的式子"}
+{"id":"E02","group":"无法判定","problem":"小明有3个苹果，又买了2个，一共几个","work":"3+2=5\n答：5个","grade":"unknown","first_error":-1,"error_type":"","note":"题面读不出算式，只能做过程自检，不给对错结论"}
+{"id":"F01","group":"版式与叙述","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n由①得 (x-2)(x-3)=0\nx=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"带编号引用的说明行"}
+{"id":"F02","group":"版式与叙述","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n(x-2)(x-3)=0\n解得 x=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"答案前带「解得」"}
+{"id":"F03","group":"版式与叙述","problem":"x^2-5x+6=0","work":"x^2-5x+6=0\n\n(x-2)(x-3)=0\n\nx=2 或 x=3","grade":"pass","first_error":-1,"error_type":"","note":"中间夹空行，不应影响行号与判定"}
+{"id":"F04","group":"版式与叙述","problem":"2x-6=12","work":"2x-6=12\n① 2x=18\n② x=9","grade":"pass","first_error":-1,"error_type":"","note":"行首带圈号，切行后应能读出式子"}

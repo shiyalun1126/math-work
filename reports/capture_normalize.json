@@ -1,0 +1,174 @@
+{
+  "summary": {
+    "generated_at": "2026-11-11T11:19:50",
+    "applied": true,
+    "n_pages": 8,
+    "n_rotated": 0,
+    "auto_agrees": 8,
+    "auto_disagree": [],
+    "orientation_unconfirmed": [],
+    "note": "自动判据只分横竖不分正反；方向以 data/capture_orientation.csv 人工确认为准。原图字节保存在 data/inbox_raw/，规范视图可随时重建。"
+  },
+  "items": [
+    {
+      "id": "W01",
+      "source": "data\\inbox_raw\\W01.jpg",
+      "target": "data/inbox/W01.jpg",
+      "backup": "data/inbox_raw/W01.jpg",
+      "rotate_ccw_deg": 0,
+      "confirmed_by": "人工目视",
+      "reason": "2026-11-11 重拍 竖直俯拍 文字正常横排 行首有⇒箭头",
+      "auto_hint": 0,
+      "auto_scores": {
+        "0": 0.8688,
+        "90": 0.0,
+        "180": 0.8688,
+        "270": 0.0
+      },
+      "auto_agrees": true,
+      "orientation_confirmed": true,
+      "backup_created": false,
+      "applied": true
+    },
+    {
+      "id": "W04",
+      "source": "data\\inbox_raw\\W04.jpg",
+      "target": "data/inbox/W04.jpg",
+      "backup": "data/inbox_raw/W04.jpg",
+      "rotate_ccw_deg": 0,
+      "confirmed_by": "人工目视",
+      "reason": "2026-11-11 重拍 竖直俯拍 五行含中文叙述行",
+      "auto_hint": 0,
+      "auto_scores": {
+        "0": 0.5993,
+        "90": 0.0988,
+        "180": 0.5993,
+        "270": 0.0988
+      },
+      "auto_agrees": true,
+      "orientation_confirmed": true,
+      "backup_created": false,
+      "applied": true
+    },
+    {
+      "id": "W05",
+      "source": "data\\inbox_raw\\W05.jpg",
+      "target": "data/inbox/W05.jpg",
+      "backup": "data/inbox_raw/W05.jpg",
+      "rotate_ccw_deg": 0,
+      "confirmed_by": "人工目视",
+      "reason": "2026-11-11 重拍 竖直俯拍 第二三行被手画括号连线连在一起",
+      "auto_hint": 0,
+      "auto_scores": {
+        "0": 0.6312,
+        "90": 0.0,
+        "180": 0.6312,
+        "270": 0.0
+      },
+      "auto_agrees": true,
+      "orientation_confirmed": true,
+      "backup_created": false,
+      "applied": true
+    },
+    {
+      "id": "W08",
+      "source": "data\\inbox_raw\\W08.jpg",
+      "target": "data/inbox/W08.jpg",
+      "backup": "data/inbox_raw/W08.jpg",
+      "rotate_ccw_deg": 0,
+      "confirmed_by": "人工目视",
+      "reason": "2026-11-11 重拍 竖直俯拍 四行无额外连线",
+      "auto_hint": 0,
+      "auto_scores": {
+        "0": 0.6576,
+        "90": 0.0,
+        "180": 0.6576,
+        "270": 0.0
+      },
+      "auto_agrees": true,
+      "orientation_confirmed": true,
+      "backup_created": false,
+      "applied": true
+    },
+    {
+      "id": "W12",
+      "source": "data\\inbox_raw\\W12.jpg",
+      "target": "data/inbox/W12.jpg",
+      "backup": "data/inbox_raw/W12.jpg",
+      "rotate_ccw_deg": 0,
+      "confirmed_by": "人工目视",
+      "reason": "2026-11-11 重拍 横向构图但文字已横排可读 无需旋转",
+      "auto_hint": 0,
+      "auto_scores": {
+        "0": 0.5651,
+        "90": 0.5435,
+        "180": 0.5651,
+        "270": 0.5435
+      },
+      "auto_agrees": true,
+      "orientation_confirmed": true,
+      "backup_created": false,
+      "applied": true
+    },
+    {
+      "id": "W13",
+      "source": "data\\inbox_raw\\W13.jpg",
+      "target": "data/inbox/W13.jpg",
+      "backup": "data/inbox_raw/W13.jpg",
+      "rotate_ccw_deg": 0,
+      "confirmed_by": "人工目视",
+      "reason": "2026-11-11 重拍 竖直俯拍 文字已横排 旧图才需要转90度",
+      "auto_hint": 0,
+      "auto_scores": {
+        "0": 0.7736,
+        "90": 0.1074,
+        "180": 0.7736,
+        "270": 0.1074
+      },
+      "auto_agrees": true,
+      "orientation_confirmed": true,
+      "backup_created": false,
+      "applied": true
+    },
+    {
+      "id": "W16",
+      "source": "data\\inbox_raw\\W16.jpg",
+      "target": "data/inbox/W16.jpg",
+      "backup": "data/inbox_raw/W16.jpg",
+      "rotate_ccw_deg": 0,
+      "confirmed_by": "人工目视",
+      "reason": "2026-11-11 重拍 横向构图文字已横排 第三行整行涂黑",
+      "auto_hint": 0,
+      "auto_scores": {
+        "0": 0.6852,
+        "90": 0.2824,
+        "180": 0.6852,
+        "270": 0.2824
+      },
+      "auto_agrees": true,
+      "orientation_confirmed": true,
+      "backup_created": false,
+      "applied": true
+    },
+    {
+      "id": "W17",
+      "source": "data\\inbox_raw\\W17.jpg",
+      "target": "data/inbox/W17.jpg",
+      "backup": "data/inbox_raw/W17.jpg",
+      "rotate_ccw_deg": 0,
+      "confirmed_by": "人工目视",
+      "reason": "2026-11-11 重拍 竖直俯拍 文字已横排 无需旋转",
+      "auto_hint": 0,
+      "auto_scores": {
+        "0": 0.7401,
+        "90": 0.1019,
+        "180": 0.7401,
+        "270": 0.1019
+      },
+      "auto_agrees": true,
+      "orientation_confirmed": true,
+      "backup_created": false,
+      "applied": true
+    }
+  ]
+}

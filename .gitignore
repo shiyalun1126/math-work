@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# 本地密钥（不要提交）
+.env
+.env.local
+config.json
+!.env.example
+
+# 缓存与运行记录
+.cache/
+runs/
+.pytest_cache/
+.ruff_cache/
+
+# 导出的调试截图
+reports/line_debug/
+reports/_smoke_*
+
+# 学生作业原图与切行小图（含个人作业内容，不入库）
+data/raw/
+data/inbox/
+data/inbox2/
+data/inbox_v1/
+data/inbox_raw/
+data/inbox_plain/
+data/crops/
+data/self/
+data/test/
+data/work/
+
+# 第三方数据集：体积大且多为非商业许可，不入库
+data/public/
+
+# 真实照片评测的当次采集快照（重跑会覆盖）
+data/photo_results.jsonl
+
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini

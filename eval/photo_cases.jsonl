@@ -1,0 +1,9 @@
+{"id":"U01","work":"x^2-5x+6=0\nx^2-6=5x\nx=2 或 x=3","sure":[true,true,true],"expect_withdrawn":[],"expect_grade":"fake","note":"每行都认准，任何断言都不该动"}
+{"id":"U02","work":"x^2-5x+6=0\nx^2-6=5x\nx=2 或 x=3","sure":[true,false,true],"expect_withdrawn":[2,3],"expect_grade":"unread","note":"错行自己没认准，它又是下一行的基准，两处断言一起撤回"}
+{"id":"U03","work":"x^2-5x+6=0\nx^2-6=5x\nx^2-5x=6\nx=2 或 x=3","sure":[true,true,false,true],"expect_withdrawn":[3,4],"expect_grade":"fake","note":"基准没认准，「成立」也要撤回；第 2 行是认准的真错，总判定保留"}
+{"id":"U04","work":"x^2-5x+6=0\n?\nx^2-5x=6\nx=2 或 x=3","sure":[true,false,true,true],"expect_withdrawn":[3],"expect_grade":"fake","note":"中间一行读不出，隔着窟窿比出来的第 3 行撤回；第 4 行的基准是认准的第 3 行，保留"}
+{"id":"U05","work":"x^2-5x+6=0\nx^2-6=5x\nx=2 或 x=3","sure":[false,true,true],"expect_withdrawn":[2,3],"expect_grade":"unread","note":"题面行没认准 → 标准解来源本身失效，整份结论应作废；当前只撤回第 2 行，见报告 §7"}
+{"id":"U06","work":"x^2-5x+6=0\nx^2-6=5x\nx^2-5x=6\nx=2 或 x=3","sure":[true,false,false,true],"expect_withdrawn":[2,3,4],"expect_grade":"unread","note":"连续两行没认准，断言全撤回"}
+{"id":"U07","work":"2x-6=12\n2x=12\nx=6","sure":[true,false,true],"expect_withdrawn":[2,3],"expect_grade":"unread","note":"一次方程版：错行没认准，后面的「成立」也不能算数"}
+{"id":"U08","work":"x^2-5x+6=0\n(x-2)(x-3)=0\nx=2 或 x=3","sure":[true,true,false],"expect_withdrawn":[3],"expect_grade":"unread","note":"答案行没认准，原本的 pass 不能维持"}
+{"id":"U09","work":"x^2-5x+6=0\nx^2-6=5x\nx^2-5x=6\nx=2 或 x=3","sure":[true,true,true,false],"expect_withdrawn":[4],"expect_grade":"fake","note":"末行没认准，前面认准的真错仍然作数"}

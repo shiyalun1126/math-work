@@ -1,0 +1,151 @@
+﻿file,latex,split,type,note
+self/eq_001.jpg,2x+5=13,self_train,方程,
+self/eq_002.jpg,3x-7=2x+4,self_train,方程,
+self/eq_003.jpg,5(x-2)=3x+4,self_train,方程,
+self/eq_004.jpg,\frac{2x-6}{2}=6,self_train,方程,
+test/eq_005.jpg,\frac{x}{3}+1=5,self_test,方程,
+self/eq_006.jpg,4-2x=x+10,self_train,方程,
+self/eq_007.jpg,2(x+3)-5=3x-1,self_train,方程,
+self/eq_008.jpg,\frac{x+1}{2}-\frac{x-1}{3}=1,self_train,方程,
+self/eq_009.jpg,x^{2}-5x+6=0,self_train,方程,
+test/eq_010.jpg,x^{2}-4=0,self_test,方程,
+self/eq_011.jpg,2x^{2}-7x+3=0,self_train,方程,
+self/eq_012.jpg,x^{2}+2x-8=0,self_train,方程,
+self/eq_013.jpg,3x^{2}=12x,self_train,方程,
+self/eq_014.jpg,x^{2}-6x+9=0,self_train,方程,
+test/eq_015.jpg,(x-1)^{2}=4,self_test,方程,
+self/eq_016.jpg,x^{2}+4x+1=0,self_train,方程,
+self/eq_017.jpg,5x^{2}-3x-2=0,self_train,方程,
+self/eq_018.jpg,x^{2}+x-1=0,self_train,方程,
+self/eq_019.jpg,\frac{x+2}{x}=3,self_train,方程,
+test/eq_020.jpg,\frac{x+1}{x-2}=3,self_test,方程,分式方程要验增根
+self/eq_021.jpg,\frac{1}{x-1}+2=\frac{3}{x-1},self_train,方程,
+self/eq_022.jpg,\sqrt{x+3}=x-1,self_train,方程,需验根
+self/eq_023.jpg,\sqrt{2x-1}=3,self_train,方程,
+self/eq_024.jpg,\sqrt{x^{2}-4}=x-2,self_train,方程,需验根
+test/eq_025.jpg,2^{x}=8,self_test,方程,
+self/eq_026.jpg,3^{x+1}=27,self_train,方程,
+self/eq_027.jpg,\log_{2}x=3,self_train,方程,
+self/eq_028.jpg,\lg(x-1)=2,self_train,方程,
+self/eq_029.jpg,|x-2|=5,self_train,方程,
+test/eq_030.jpg,x+\frac{1}{x}=3,self_test,方程,
+self/sys_001.jpg,\begin{cases} 2x+y=7 \\ x-y=2 \end{cases},self_train,方程组,两行用大括号
+self/sys_002.jpg,\begin{cases} 3x+2y=12 \\ x-2y=-4 \end{cases},self_train,方程组,
+self/sys_003.jpg,\begin{cases} x+y=5 \\ x-y=1 \end{cases},self_train,方程组,
+self/sys_004.jpg,\begin{cases} 2x+3y=13 \\ 3x-2y=0 \end{cases},self_train,方程组,
+test/sys_005.jpg,\begin{cases} x+2y=8 \\ 3x-y=3 \end{cases},self_test,方程组,
+self/sys_006.jpg,\begin{cases} 4x-3y=5 \\ 2x+5y=9 \end{cases},self_train,方程组,
+self/sys_007.jpg,\begin{cases} \frac{x}{2}+\frac{y}{3}=2 \\ x-y=1 \end{cases},self_train,方程组,分式系数
+self/sys_008.jpg,\begin{cases} x^{2}+y=5 \\ x+y=3 \end{cases},self_train,方程组,非线性
+self/sys_009.jpg,\begin{cases} x-y=2 \\ xy=15 \end{cases},self_train,方程组,非线性
+test/sys_010.jpg,\begin{cases} 2x+y=1 \\ x^{2}-y=0 \end{cases},self_test,方程组,非线性
+self/simp_001.jpg,\frac{x^{2}-1}{x+1},self_train,化简,
+self/simp_002.jpg,(a+b)^{2}-(a-b)^{2},self_train,化简,
+self/simp_003.jpg,x^{2}-9,self_train,化简,因式分解
+self/simp_004.jpg,2x \cdot 3x^{2},self_train,化简,
+test/simp_005.jpg,\sqrt{8}+\sqrt{18},self_test,化简,
+self/simp_006.jpg,(2\sqrt{3})^{2},self_train,化简,
+self/simp_007.jpg,\frac{1}{1+\sqrt{2}},self_train,化简,分母有理化
+self/simp_008.jpg,\frac{x+1}{x^{2}-1},self_train,化简,
+self/simp_009.jpg,a^{3}-a,self_train,化简,
+test/simp_010.jpg,3a^{2}b \cdot 2ab^{2},self_test,化简,
+self/simp_011.jpg,\sqrt{12}-\sqrt{3},self_train,化简,
+self/simp_012.jpg,\left(\sqrt{5}+1\right)\left(\sqrt{5}-1\right),self_train,化简,
+self/simp_013.jpg,\frac{a-b}{a^{2}-b^{2}},self_train,化简,
+self/simp_014.jpg,x^{2}+5x+6,self_train,化简,因式分解
+test/simp_015.jpg,4x^{2}-12x+9,self_test,化简,完全平方
+self/simp_016.jpg,a^{2}-2ab+b^{2},self_train,化简,
+self/simp_017.jpg,\frac{x^{3}-8}{x-2},self_train,化简,
+self/simp_018.jpg,\frac{2}{x-1}-\frac{2}{x+1},self_train,化简,
+self/simp_019.jpg,\left(a+\frac{1}{a}\right)^{2},self_train,化简,
+test/simp_020.jpg,\sqrt{18}-\sqrt{2},self_test,化简,
+self/simp_021.jpg,\frac{x^{2}-4x+4}{x-2},self_train,化简,
+self/simp_022.jpg,3\sqrt{2} \cdot 2\sqrt{3},self_train,化简,
+self/simp_023.jpg,\log_{2}8+\log_{2}4,self_train,化简,
+test/simp_024.jpg,\sin^{2}x+\cos^{2}x,self_test,化简,
+self/simp_025.jpg,\frac{2x}{x^{2}-1},self_train,化简,部分分式
+self/calc_001.jpg,\frac{d}{dx}\left(x^{3}\right),self_train,求导积分,
+self/calc_002.jpg,\frac{d}{dx}\left(x^{2}+2x\right),self_train,求导积分,
+self/calc_003.jpg,\frac{d}{dx}\left(\sin x\right),self_train,求导积分,
+self/calc_004.jpg,y=x^{3},self_train,求导积分,
+test/calc_005.jpg,"\int x^{2} \, dx",self_test,求导积分,
+self/calc_006.jpg,"\int_{0}^{1} x^{2} \, dx",self_train,求导积分,
+self/calc_007.jpg,"\int (2x+1) \, dx",self_train,求导积分,
+self/calc_008.jpg,"\int \sin x \, dx",self_train,求导积分,
+test/calc_009.jpg,"\int_{1}^{2} \frac{1}{x} \, dx",self_test,求导积分,
+self/calc_010.jpg,"\int e^{x} \, dx",self_train,求导积分,
+self/calc_011.jpg,\frac{d}{dx}\left(e^{x}\right),self_train,求导积分,
+self/calc_012.jpg,\frac{d}{dx}\left(\ln x\right),self_train,求导积分,
+self/calc_013.jpg,\frac{d}{dx}\left(x\sin x\right),self_train,求导积分,
+test/calc_014.jpg,y=x^{2}e^{x},self_test,求导积分,
+self/calc_015.jpg,"\int x e^{x} \, dx",self_train,求导积分,分部积分
+self/calc_016.jpg,\lim_{x \to 0} \frac{\sin x}{x},self_train,求导积分,
+self/calc_017.jpg,\lim_{x \to \infty}\left(1+\frac{1}{x}\right)^{x},self_train,求导积分,
+test/calc_018.jpg,\lim_{x \to 2} \frac{x^{2}-4}{x-2},self_test,求导积分,
+self/calc_019.jpg,\sum_{i=1}^{n} i,self_train,求导积分,
+self/calc_020.jpg,\sum_{k=0}^{3} 2^{k},self_train,求导积分,
+self/calc_021.jpg,"\int_{0}^{\pi} \sin x \, dx",self_train,求导积分,
+test/calc_022.jpg,"\int_{1}^{e} \frac{1}{x} \, dx",self_test,求导积分,
+self/calc_023.jpg,\frac{d}{dx}\left(\sqrt{x}\right),self_train,求导积分,
+self/calc_024.jpg,"\int \sqrt{x} \, dx",self_train,求导积分,
+test/calc_025.jpg,y=\frac{1}{x^{2}},self_test,求导积分,
+self/comp_001.jpg,\sqrt{\frac{x+1}{x-1}},self_train,复合结构,根号套分式
+self/comp_002.jpg,\frac{\sqrt{x}+1}{\sqrt{x}-1},self_train,复合结构,
+self/comp_003.jpg,x^{\frac{1}{2}}+x^{-\frac{1}{2}},self_train,复合结构,上标是分数
+self/comp_004.jpg,\frac{x^{2}+1}{x^{2}-1},self_train,复合结构,
+test/comp_005.jpg,\sqrt{x^{2}+2x+1},self_test,复合结构,
+self/comp_006.jpg,\frac{1}{\sqrt{x}+1},self_train,复合结构,
+self/comp_007.jpg,\frac{2^{n+1}}{2^{n}},self_train,复合结构,
+self/comp_008.jpg,\log_{a}\left(x^{2}\right),self_train,复合结构,底数下标+真数上标
+test/comp_009.jpg,\cos 2x=2\cos^{2}x-1,self_test,复合结构,
+self/comp_010.jpg,\sqrt{1-x^{2}},self_train,复合结构,
+self/comp_011.jpg,\frac{x-1}{x^{2}+x},self_train,复合结构,
+self/comp_012.jpg,e^{-x^{2}},self_train,复合结构,上标带负号和平方
+self/comp_013.jpg,\frac{n!}{k!(n-k)!},self_train,复合结构,
+self/comp_014.jpg,a^{\frac{1}{3}} \cdot a^{\frac{2}{3}},self_train,复合结构,
+test/comp_015.jpg,\frac{1}{1+e^{-x}},self_test,复合结构,
+self/comp_016.jpg,\frac{x+y}{x-y},self_train,复合结构,
+self/comp_017.jpg,\sqrt{\frac{1+\sqrt{5}}{2}},self_train,复合结构,根号套根号
+self/comp_018.jpg,\frac{3}{x^{2}-1},self_train,复合结构,
+self/comp_019.jpg,(x^{2}+1)^{2},self_train,复合结构,
+test/comp_020.jpg,\sqrt{a+b} \cdot \sqrt{a-b},self_test,复合结构,
+self/comp_021.jpg,\frac{\frac{1}{x}+\frac{1}{y}}{\frac{1}{x}-\frac{1}{y}},self_train,复合结构,繁分数
+self/comp_022.jpg,\log\left(x^{2}+1\right),self_train,复合结构,
+self/comp_023.jpg,\frac{2}{1+\sqrt{1-x}},self_train,复合结构,
+self/comp_024.jpg,\sqrt{x+\sqrt{x}},self_train,复合结构,
+test/comp_025.jpg,\frac{(a-b)^{2}}{a^{2}-b^{2}},self_test,复合结构,
+self/comp_026.jpg,\left(\frac{x+1}{x}\right)^{2},self_train,复合结构,括号套分式
+self/comp_027.jpg,\frac{x}{1+x^{2}},self_train,复合结构,
+self/comp_028.jpg,\sqrt{2x^{2}+3x-1},self_train,复合结构,
+self/comp_029.jpg,a^{3}+b^{3}=(a+b)(a^{2}-ab+b^{2}),self_train,复合结构,
+test/comp_030.jpg,\frac{1}{a+\frac{1}{b+\frac{1}{c}}},self_test,复合结构,三层繁分数
+test/hard_001.jpg,2 \times 3=6,self_test,难例,乘号写得像 x
+test/hard_002.jpg,x \times y=6,self_test,难例,x 与 × 混在一起
+test/hard_003.jpg,3 \times x+1,self_test,难例,两个符号都要区分
+test/hard_004.jpg,5 \times 2x,self_test,难例,乘法与字母连写
+test/hard_005.jpg,21-1=20,self_test,难例,1 写成竖线
+test/hard_006.jpg,l+1=3,self_test,难例,字母 l 与数字 1
+test/hard_007.jpg,\frac{1}{7},self_test,难例,1 和 7 都竖着写
+test/hard_008.jpg,2z+3=7,self_test,难例,z 写得像 2
+test/hard_009.jpg,z^{2}=4,self_test,难例,z 与 2 混淆
+test/hard_010.jpg,3z-2=1,self_test,难例,
+test/hard_011.jpg,5x-3=2,self_test,难例,5 写得像 S
+test/hard_012.jpg,S=5t,self_test,难例,S 与 5
+test/hard_013.jpg,0),self_test,难例,"O(0,0)"
+test/hard_014.jpg,x^{2}+y^{2}=1,self_test,难例,上标写得小且贴字母
+test/hard_015.jpg,e^{x}=2,self_test,难例,上标位置模糊
+test/hard_016.jpg,a^{n+1},self_test,难例,上标带括号
+test/hard_017.jpg,x_{1}+x_{2}=3,self_test,难例,下标
+test/hard_018.jpg,a_{n}a_{n-1},self_test,难例,下标边界不清
+test/hard_019.jpg,S_{n}=n^{2},self_test,难例,上下标同时出现
+test/hard_020.jpg,\frac{a+b}{a-b},self_test,难例,分数线画得过长
+test/hard_021.jpg,\frac{x+1}{x-1}=2,self_test,难例,分母线过短
+test/hard_022.jpg,\frac{1}{2x},self_test,难例,2x 是否在分式线内
+test/hard_023.jpg,a+(b+c),self_test,难例,括号大小层次
+test/hard_024.jpg,\sqrt{x+1}+\sqrt{x-1},self_test,难例,两个根号是否连笔
+test/hard_025.jpg,(x+(y-z))^{2},self_test,难例,嵌套括号
+test/hard_026.jpg,"\int_{0}^{1} x \, dx",self_test,难例,上下限写得潦草
+test/hard_027.jpg,\lim_{n \to \infty} \frac{1}{n},self_test,难例,lim 下方字挤在一起
+test/hard_028.jpg,\frac{\sin x}{\cos x},self_test,难例,sinx 连写成一团
+test/hard_029.jpg,\frac{\frac{1}{x}}{\frac{1}{y}},self_test,难例,分数套分数
+test/hard_030.jpg,2x+3=7,self_test,难例,写错后划掉重写在旁边

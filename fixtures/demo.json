@@ -1,0 +1,56 @@
+{
+  "demo1": {
+    "label": "一元二次方程 x²-5x+6=0",
+    "candidates": [
+      {"latex": "x^2-5x+6=0", "source": "simpletex", "conf": 0.94},
+      {"latex": "x^{2}-5x+6=0", "source": "qwen3-vl"},
+      {"latex": "x^2-5x+6=0", "source": "qwen3-vl"}
+    ]
+  },
+  "demo2": {
+    "label": "分式方程 (x+1)/(x-2)=3",
+    "candidates": [
+      {"latex": "\\frac{x+1}{x-2}=3", "source": "simpletex", "conf": 0.91},
+      {"latex": "\\frac{x+1}{x-2}=3", "source": "qwen3-vl"},
+      {"latex": "\\frac{x+1}{x-2}=3", "source": "qwen3-vl"}
+    ]
+  },
+  "demo3": {
+    "label": "难例：x 与 × 混淆",
+    "candidates": [
+      {"latex": "x^2-3x+2=0", "source": "simpletex", "conf": 0.62},
+      {"latex": "\\times^2-3x+2=0", "source": "qwen3-vl"}
+    ]
+  },
+  "demo4": {
+    "label": "不定积分 ∫x e^x dx",
+    "candidates": [
+      {"latex": "\\int x e^x dx", "source": "simpletex", "conf": 0.88},
+      {"latex": "\\int x e^{x}\\, dx", "source": "qwen3-vl"},
+      {"latex": "\\int x e^x dx", "source": "qwen3-vl"}
+    ]
+  },
+  "demo5": {
+    "label": "二元一次方程组",
+    "candidates": [
+      {"latex": "\\begin{cases} x+y=3 \\\\ x-y=1 \\end{cases}", "source": "simpletex", "conf": 0.86},
+      {"latex": "\\begin{cases} x+y=3 \\\\ x-y=1 \\end{cases}", "source": "qwen3-vl"},
+      {"latex": "\\begin{cases} x+y=3 \\\\ x-y=l \\end{cases}", "source": "qwen3-vl"}
+    ]
+  },
+  "demo6": {
+    "label": "难例：1 与 l 混淆",
+    "candidates": [
+      {"latex": "2x+1=5", "source": "simpletex", "conf": 0.71},
+      {"latex": "2x+l=5", "source": "qwen3-vl"}
+    ]
+  },
+  "demo7": {
+    "label": "移项漏符号 3x-5=x+7",
+    "candidates": [
+      {"latex": "3x-5=x+7", "source": "simpletex", "conf": 0.9},
+      {"latex": "3x-5=x-7", "source": "qwen3-vl"},
+      {"latex": "3x-5=x+7", "source": "qwen3-vl"}
+    ]
+  }
+}

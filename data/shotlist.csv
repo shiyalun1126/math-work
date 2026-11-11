@@ -1,0 +1,201 @@
+﻿id,type,split,display,latex,note
+eq_001,方程,self_train,2x+5=13,"2x+5=13",
+eq_002,方程,self_train,3x-7=2x+4,"3x-7=2x+4",
+eq_003,方程,self_train,5(x-2)=3x+4,"5(x-2)=3x+4",
+eq_004,方程,self_train,(2x-6)/2=6,"\frac{2x-6}{2}=6",
+eq_005,方程,self_test,x/3+1=5,"\frac{x}{3}+1=5",
+eq_006,方程,self_train,4-2x=x+10,"4-2x=x+10",
+eq_007,方程,self_train,2(x+3)-5=3x-1,"2(x+3)-5=3x-1",
+eq_008,方程,self_train,(x+1)/2-(x-1)/3=1,"\frac{x+1}{2}-\frac{x-1}{3}=1",
+eq_009,方程,self_train,x²-5x+6=0,"x^{2}-5x+6=0",
+eq_010,方程,self_test,x²-4=0,"x^{2}-4=0",
+eq_011,方程,self_train,2x²-7x+3=0,"2x^{2}-7x+3=0",
+eq_012,方程,self_train,x²+2x-8=0,"x^{2}+2x-8=0",
+eq_013,方程,self_train,3x²=12x,"3x^{2}=12x",
+eq_014,方程,self_train,x²-6x+9=0,"x^{2}-6x+9=0",
+eq_015,方程,self_test,(x-1)²=4,"(x-1)^{2}=4",
+eq_016,方程,self_train,x²+4x+1=0,"x^{2}+4x+1=0",
+eq_017,方程,self_train,5x²-3x-2=0,"5x^{2}-3x-2=0",
+eq_018,方程,self_train,x²+x-1=0,"x^{2}+x-1=0",
+eq_019,方程,self_train,(x+2)/x=3,"\frac{x+2}{x}=3",
+eq_020,方程,self_test,(x+1)/(x-2)=3,"\frac{x+1}{x-2}=3",分式方程要验增根
+eq_021,方程,self_train,1/(x-1)+2=3/(x-1),"\frac{1}{x-1}+2=\frac{3}{x-1}",
+eq_022,方程,self_train,√(x+3)=x-1,"\sqrt{x+3}=x-1",需验根
+eq_023,方程,self_train,√(2x-1)=3,"\sqrt{2x-1}=3",
+eq_024,方程,self_train,√(x²-4)=x-2,"\sqrt{x^{2}-4}=x-2",需验根
+eq_025,方程,self_test,2^x=8,"2^{x}=8",
+eq_026,方程,self_train,3^(x+1)=27,"3^{x+1}=27",
+eq_027,方程,self_train,log₂x=3,"\log_{2}x=3",
+eq_028,方程,self_train,lg(x-1)=2,"\lg(x-1)=2",
+eq_029,方程,self_train,|x-2|=5,"|x-2|=5",
+eq_030,方程,self_test,x+1/x=3,"x+\frac{1}{x}=3",
+sys_001,方程组,self_train,"{2x+y=7, x-y=2}","\begin{cases} 2x+y=7 \\ x-y=2 \end{cases}",两行用大括号
+sys_002,方程组,self_train,"{3x+2y=12, x-2y=-4}","\begin{cases} 3x+2y=12 \\ x-2y=-4 \end{cases}",
+sys_003,方程组,self_train,"{x+y=5, x-y=1}","\begin{cases} x+y=5 \\ x-y=1 \end{cases}",
+sys_004,方程组,self_train,"{2x+3y=13, 3x-2y=0}","\begin{cases} 2x+3y=13 \\ 3x-2y=0 \end{cases}",
+sys_005,方程组,self_test,"{x+2y=8, 3x-y=3}","\begin{cases} x+2y=8 \\ 3x-y=3 \end{cases}",
+sys_006,方程组,self_train,"{4x-3y=5, 2x+5y=9}","\begin{cases} 4x-3y=5 \\ 2x+5y=9 \end{cases}",
+sys_007,方程组,self_train,"{x/2+y/3=2, x-y=1}","\begin{cases} \frac{x}{2}+\frac{y}{3}=2 \\ x-y=1 \end{cases}",分式系数
+sys_008,方程组,self_train,"{x²+y=5, x+y=3}","\begin{cases} x^{2}+y=5 \\ x+y=3 \end{cases}",非线性
+sys_009,方程组,self_train,"{x-y=2, xy=15}","\begin{cases} x-y=2 \\ xy=15 \end{cases}",非线性
+sys_010,方程组,self_test,"{2x+y=1, x²-y=0}","\begin{cases} 2x+y=1 \\ x^{2}-y=0 \end{cases}",非线性
+simp_001,化简,self_train,(x²-1)/(x+1),"\frac{x^{2}-1}{x+1}",
+simp_002,化简,self_train,(a+b)²-(a-b)²,"(a+b)^{2}-(a-b)^{2}",
+simp_003,化简,self_train,x²-9,"x^{2}-9",因式分解
+simp_004,化简,self_train,2x·3x²,"2x \cdot 3x^{2}",
+simp_005,化简,self_test,√8+√18,"\sqrt{8}+\sqrt{18}",
+simp_006,化简,self_train,(2√3)²,"(2\sqrt{3})^{2}",
+simp_007,化简,self_train,1/(1+√2),"\frac{1}{1+\sqrt{2}}",分母有理化
+simp_008,化简,self_train,(x+1)/(x²-1),"\frac{x+1}{x^{2}-1}",
+simp_009,化简,self_train,a³-a,"a^{3}-a",
+simp_010,化简,self_test,(3a²b)·(2ab²),"3a^{2}b \cdot 2ab^{2}",
+simp_011,化简,self_train,√12-√3,"\sqrt{12}-\sqrt{3}",
+simp_012,化简,self_train,(√5+1)(√5-1),"\left(\sqrt{5}+1\right)\left(\sqrt{5}-1\right)",
+simp_013,化简,self_train,(a-b)/(a²-b²),"\frac{a-b}{a^{2}-b^{2}}",
+simp_014,化简,self_train,x²+5x+6,"x^{2}+5x+6",因式分解
+simp_015,化简,self_test,4x²-12x+9,"4x^{2}-12x+9",完全平方
+simp_016,化简,self_train,a²-2ab+b²,"a^{2}-2ab+b^{2}",
+simp_017,化简,self_train,(x³-8)/(x-2),"\frac{x^{3}-8}{x-2}",
+simp_018,化简,self_train,2/(x-1)-2/(x+1),"\frac{2}{x-1}-\frac{2}{x+1}",
+simp_019,化简,self_train,(a+1/a)²,"\left(a+\frac{1}{a}\right)^{2}",
+simp_020,化简,self_test,√18-√2,"\sqrt{18}-\sqrt{2}",
+simp_021,化简,self_train,(x²-4x+4)/(x-2),"\frac{x^{2}-4x+4}{x-2}",
+simp_022,化简,self_train,3√2·2√3,"3\sqrt{2} \cdot 2\sqrt{3}",
+simp_023,化简,self_train,log₂8+log₂4,"\log_{2}8+\log_{2}4",
+simp_024,化简,self_test,sin²x+cos²x,"\sin^{2}x+\cos^{2}x",
+simp_025,化简,self_train,2x/(x²-1),"\frac{2x}{x^{2}-1}",部分分式
+calc_001,求导积分,self_train,d/dx(x³),"\frac{d}{dx}\left(x^{3}\right)",
+calc_002,求导积分,self_train,d/dx(x²+2x),"\frac{d}{dx}\left(x^{2}+2x\right)",
+calc_003,求导积分,self_train,d/dx(sin x),"\frac{d}{dx}\left(\sin x\right)",
+calc_004,求导积分,self_train,y=x³ 求 y',"y=x^{3}",
+calc_005,求导积分,self_test,∫x²dx,"\int x^{2} \, dx",
+calc_006,求导积分,self_train,∫₀¹x²dx,"\int_{0}^{1} x^{2} \, dx",
+calc_007,求导积分,self_train,∫(2x+1)dx,"\int (2x+1) \, dx",
+calc_008,求导积分,self_train,∫sin x dx,"\int \sin x \, dx",
+calc_009,求导积分,self_test,∫₁²(1/x)dx,"\int_{1}^{2} \frac{1}{x} \, dx",
+calc_010,求导积分,self_train,∫e^x dx,"\int e^{x} \, dx",
+calc_011,求导积分,self_train,d/dx(e^x),"\frac{d}{dx}\left(e^{x}\right)",
+calc_012,求导积分,self_train,d/dx(ln x),"\frac{d}{dx}\left(\ln x\right)",
+calc_013,求导积分,self_train,d/dx(x·sin x),"\frac{d}{dx}\left(x\sin x\right)",
+calc_014,求导积分,self_test,y=x²e^x,"y=x^{2}e^{x}",
+calc_015,求导积分,self_train,∫x·e^x dx,"\int x e^{x} \, dx",分部积分
+calc_016,求导积分,self_train,lim x→0 sinx/x,"\lim_{x \to 0} \frac{\sin x}{x}",
+calc_017,求导积分,self_train,lim x→∞ (1+1/x)^x,"\lim_{x \to \infty}\left(1+\frac{1}{x}\right)^{x}",
+calc_018,求导积分,self_test,lim x→2 (x²-4)/(x-2),"\lim_{x \to 2} \frac{x^{2}-4}{x-2}",
+calc_019,求导积分,self_train,∑(i=1 到 n) i,"\sum_{i=1}^{n} i",
+calc_020,求导积分,self_train,∑(k=0 到 3) 2^k,"\sum_{k=0}^{3} 2^{k}",
+calc_021,求导积分,self_train,∫₀^π sin x dx,"\int_{0}^{\pi} \sin x \, dx",
+calc_022,求导积分,self_test,∫₁^e (1/x) dx,"\int_{1}^{e} \frac{1}{x} \, dx",
+calc_023,求导积分,self_train,d/dx(√x),"\frac{d}{dx}\left(\sqrt{x}\right)",
+calc_024,求导积分,self_train,∫√x dx,"\int \sqrt{x} \, dx",
+calc_025,求导积分,self_test,y=1/x² 求 y',"y=\frac{1}{x^{2}}",
+comp_001,复合结构,self_train,√((x+1)/(x-1)),"\sqrt{\frac{x+1}{x-1}}",根号套分式
+comp_002,复合结构,self_train,(√x+1)/(√x-1),"\frac{\sqrt{x}+1}{\sqrt{x}-1}",
+comp_003,复合结构,self_train,x^(1/2)+x^(-1/2),"x^{\frac{1}{2}}+x^{-\frac{1}{2}}",上标是分数
+comp_004,复合结构,self_train,(x²+1)/(x²-1),"\frac{x^{2}+1}{x^{2}-1}",
+comp_005,复合结构,self_test,√(x²+2x+1),"\sqrt{x^{2}+2x+1}",
+comp_006,复合结构,self_train,1/(√x+1),"\frac{1}{\sqrt{x}+1}",
+comp_007,复合结构,self_train,2^(n+1)/2^n,"\frac{2^{n+1}}{2^{n}}",
+comp_008,复合结构,self_train,log_a(x²),"\log_{a}\left(x^{2}\right)",底数下标+真数上标
+comp_009,复合结构,self_test,cos2x=2cos²x-1,"\cos 2x=2\cos^{2}x-1",
+comp_010,复合结构,self_train,√(1-x²),"\sqrt{1-x^{2}}",
+comp_011,复合结构,self_train,(x-1)/(x²+x),"\frac{x-1}{x^{2}+x}",
+comp_012,复合结构,self_train,e^(-x²),"e^{-x^{2}}",上标带负号和平方
+comp_013,复合结构,self_train,n!/(k!(n-k)!),"\frac{n!}{k!(n-k)!}",
+comp_014,复合结构,self_train,(a^(1/3))·(a^(2/3)),"a^{\frac{1}{3}} \cdot a^{\frac{2}{3}}",
+comp_015,复合结构,self_test,1/(1+e^(-x)),"\frac{1}{1+e^{-x}}",
+comp_016,复合结构,self_train,(x+y)/(x-y),"\frac{x+y}{x-y}",
+comp_017,复合结构,self_train,√((1+√5)/2),"\sqrt{\frac{1+\sqrt{5}}{2}}",根号套根号
+comp_018,复合结构,self_train,3/(x²-1),"\frac{3}{x^{2}-1}",
+comp_019,复合结构,self_train,(x²+1)²,"(x^{2}+1)^{2}",
+comp_020,复合结构,self_test,√(a+b)·√(a-b),"\sqrt{a+b} \cdot \sqrt{a-b}",
+comp_021,复合结构,self_train,(1/x+1/y)/(1/x-1/y),"\frac{\frac{1}{x}+\frac{1}{y}}{\frac{1}{x}-\frac{1}{y}}",繁分数
+comp_022,复合结构,self_train,log(x²+1),"\log\left(x^{2}+1\right)",
+comp_023,复合结构,self_train,2/(1+√(1-x)),"\frac{2}{1+\sqrt{1-x}}",
+comp_024,复合结构,self_train,√(x+√x),"\sqrt{x+\sqrt{x}}",
+comp_025,复合结构,self_test,(a-b)²/(a²-b²),"\frac{(a-b)^{2}}{a^{2}-b^{2}}",
+comp_026,复合结构,self_train,((x+1)/x)²,"\left(\frac{x+1}{x}\right)^{2}",括号套分式
+comp_027,复合结构,self_train,x/(1+x²),"\frac{x}{1+x^{2}}",
+comp_028,复合结构,self_train,√(2x²+3x-1),"\sqrt{2x^{2}+3x-1}",
+comp_029,复合结构,self_train,a³+b³=(a+b)(a²-ab+b²),"a^{3}+b^{3}=(a+b)(a^{2}-ab+b^{2})",
+comp_030,复合结构,self_test,1/(a+1/(b+1/c)),"\frac{1}{a+\frac{1}{b+\frac{1}{c}}}",三层繁分数
+hard_001,难例,self_test,2×3=6,"2 \times 3=6",乘号写得像 x
+hard_002,难例,self_test,x×y=6,"x \times y=6",x 与 × 混在一起
+hard_003,难例,self_test,3×x+1,"3 \times x+1",两个符号都要区分
+hard_004,难例,self_test,5×2x,"5 \times 2x",乘法与字母连写
+hard_005,难例,self_test,21-1=20,"21-1=20",1 写成竖线
+hard_006,难例,self_test,l+1=3,"l+1=3",字母 l 与数字 1
+hard_007,难例,self_test,1/7,"\frac{1}{7}",1 和 7 都竖着写
+hard_008,难例,self_test,2z+3=7,"2z+3=7",z 写得像 2
+hard_009,难例,self_test,z²=4,"z^{2}=4",z 与 2 混淆
+hard_010,难例,self_test,3z-2=1,"3z-2=1",
+hard_011,难例,self_test,5x-3=2,"5x-3=2",5 写得像 S
+hard_012,难例,self_test,S=5t,"S=5t",S 与 5
+hard_013,难例,self_test,O(0,0),"O(0,0)",O 与 0
+hard_014,难例,self_test,x²+y²=1,"x^{2}+y^{2}=1",上标写得小且贴字母
+hard_015,难例,self_test,e^x=2,"e^{x}=2",上标位置模糊
+hard_016,难例,self_test,a^(n+1),"a^{n+1}",上标带括号
+hard_017,难例,self_test,x₁+x₂=3,"x_{1}+x_{2}=3",下标
+hard_018,难例,self_test,a_n·a_(n-1),"a_{n}a_{n-1}",下标边界不清
+hard_019,难例,self_test,S_n=n²,"S_{n}=n^{2}",上下标同时出现
+hard_020,难例,self_test,(a+b)/(a-b),"\frac{a+b}{a-b}",分数线画得过长
+hard_021,难例,self_test,(x+1)/(x-1)=2,"\frac{x+1}{x-1}=2",分母线过短
+hard_022,难例,self_test,1/(2x),"\frac{1}{2x}",2x 是否在分式线内
+hard_023,难例,self_test,a+(b+c),"a+(b+c)",括号大小层次
+hard_024,难例,self_test,√(x+1)+√(x-1),"\sqrt{x+1}+\sqrt{x-1}",两个根号是否连笔
+hard_025,难例,self_test,(x+(y-z))²,"(x+(y-z))^{2}",嵌套括号
+hard_026,难例,self_test,∫₀¹x dx,"\int_{0}^{1} x \, dx",上下限写得潦草
+hard_027,难例,self_test,lim n→∞ 1/n,"\lim_{n \to \infty} \frac{1}{n}",lim 下方字挤在一起
+hard_028,难例,self_test,sinx/cosx,"\frac{\sin x}{\cos x}",sinx 连写成一团
+hard_029,难例,self_test,(1/x)/(1/y),"\frac{\frac{1}{x}}{\frac{1}{y}}",分数套分数
+hard_030,难例,self_test,2x+3=7,"2x+3=7",写错后划掉重写在旁边
+free_001,自由写,self_test,,,,自己随手写，不用照抄
+free_002,自由写,self_test,,,,
+free_003,自由写,self_test,,,,
+free_004,自由写,self_test,,,,
+free_005,自由写,self_test,,,,
+free_006,自由写,self_test,,,,
+free_007,自由写,self_test,,,,
+free_008,自由写,self_test,,,,
+free_009,自由写,self_test,,,,
+free_010,自由写,self_test,,,,
+free_011,自由写,self_test,,,,
+free_012,自由写,self_test,,,,
+free_013,自由写,self_test,,,,
+free_014,自由写,self_test,,,,
+free_015,自由写,self_test,,,,
+free_016,自由写,self_test,,,,
+free_017,自由写,self_test,,,,
+free_018,自由写,self_test,,,,
+free_019,自由写,self_test,,,,
+free_020,自由写,self_test,,,,
+free_021,自由写,self_test,,,,
+free_022,自由写,self_test,,,,
+free_023,自由写,self_test,,,,
+free_024,自由写,self_test,,,,
+free_025,自由写,self_test,,,,
+free_026,自由写,self_test,,,,
+free_027,自由写,self_test,,,,
+free_028,自由写,self_test,,,,
+free_029,自由写,self_test,,,,
+free_030,自由写,self_test,,,,
+free_031,自由写,self_test,,,,
+free_032,自由写,self_test,,,,
+free_033,自由写,self_test,,,,
+free_034,自由写,self_test,,,,
+free_035,自由写,self_test,,,,
+free_036,自由写,self_test,,,,
+free_037,自由写,self_test,,,,
+free_038,自由写,self_test,,,,
+free_039,自由写,self_test,,,,
+free_040,自由写,self_test,,,,
+free_041,自由写,self_test,,,,
+free_042,自由写,self_test,,,,
+free_043,自由写,self_test,,,,
+free_044,自由写,self_test,,,,
+free_045,自由写,self_test,,,,
+free_046,自由写,self_test,,,,
+free_047,自由写,self_test,,,,
+free_048,自由写,self_test,,,,
+free_049,自由写,self_test,,,,
+free_050,自由写,self_test,,,,
