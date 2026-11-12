@@ -63,7 +63,7 @@ F:/PyCharm/python.exe tools/check_env.py --image 你的照片.jpg   # 直接跑�
 |---|---|---|
 | `mathagent/perceive.py` | 多源识别 | SimpleTex 与 Qwen3-VL 架构不同，错误模式才不相关，投票才有意义 |
 | `mathagent/latex.py` | 归一化 + 解析 | 解析失败返回 `ok=False`，不抛异常——否则"识别错"和"解析器崩"混在一起没法排查 |
-| `mathagent/verify.py` | 语义聚类 + 投票 | 判定标准是 `simplify(a-b)==0`，不是字符串相等；化简带 3 秒超时保护 |
+| `mathagent/verify.py` | 语义聚类 + 投票 | 判定标准是 `simplify(a-b)==0`，不是字符串相等；化简带 3 秒超时保护（跑在子进程里，到点直接杀掉，见 `批改链路.md` §12） |
 | `mathagent/solve.py` | 符号求解 + 步骤验算 | SymPy 算、模板讲；每步带 `check` 模式，事后逐条复算，不过关就丢进 `dropped` |
 | `mathagent/pipeline.py` | 编排 | 认得出但解不出 → 自动降级为 review；算错时不生成讲评 |
 | `mathagent/explain.py` | 大模型讲评 | 只描述思路，禁写公式；输出后回扫，出现无法验证的等式整段丢弃 |
@@ -139,7 +139,8 @@ F:/PyCharm/python.exe tools/make_photo_sample.py
 - **演示数据是合成图**，不是真实手写。它们只用来验证链路，不能用来报识别率
 - **单源时无法交叉验证**：只配一把钥匙时，一致度是同一模型的自一致性，上限压到 80%。要拿到真正的旁证，必须再配一个厂商的识别模型
 - **没有做置信度 token 概率**，用多源投票替代
-- **几何图形完全没碰**（二期）
+- **几何图形走的是另一条链路**：`geoagent/` 已有题干+图形的结构 → 校验 → 求解/推理，
+  离线测试在 `tests/test_geo*.py`；它**不在本文件的图片→公式链路上**，读图仍依赖外部 VLM
 - **识别链路的评测还没跑起来**：`eval/` 已经建好，批改评测跑通了
   （`eval/work_cases.jsonl` 40 条文本过程 + 9 条拍照撤回，见 `docs/批改链路.md` §11），
   但 ExpRate / 语义等价率这些**识别**指标仍然卡在真实手写照片上——`data/test/` 为空，

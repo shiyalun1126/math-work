@@ -167,6 +167,61 @@ def split_tall(bands, p, median_h, depth=0):
     return out
 
 
+def lead_fragment_end(cols: np.ndarray, band_h: int) -> int:
+    """行首那一小块如果窄、又和后面的字隔着一段空，返回主体该从哪里开始。
+
+    学生写方程组时那个 `{` 横跨两行，水平投影从中间把它切成上下两截，各自混进
+    相邻两行的小图里。残片被识别器读成 `2`、`1`、`)`、`7`——
+    `2x+y=4` 于是读成 `22x+y=4`、`x+3y=7` 读成 `1x+3y=7`、
+    最后的 `y=2` 读成 `7y=2`（那一步会被判成"不成立"，而学生写的是对的）。
+
+    这不是模型看错，是框里真的多了一个字。**加提示词没用**：
+    模型答的是它看见的东西，而它看见的那一竖确实在框里。
+
+    判据要两个条件同时成立，缺一个就会误伤真内容：
+      · 窄——宽度不到行高的六成。`{` 的残片是 9~15 px（行高 47~84 px）；
+        而 `3x` 的 `3` 有 24 px、`(x-1)` 的 `(` 有 20 px，差着一倍。
+      · 隔开——和后面那块的空隙不比对残片本身窄。学生写 `1x` 时 1 和 x 是
+        挨着的，`(x-1)` 的括号也紧贴 x；只有被切开的括号才独自留在边上。
+
+    连续跳两块，因为末尾那行常常是「∴ { y=2」——推导符和括号残片并排站着，
+    跳掉一个另一个还在，照样捣乱。最多两块：跳太多就是把整行内容当垃圾扔了。
+    """
+    n = len(cols)
+    i = 0
+    pos = -1
+    head0 = len(cols)
+    for k in range(2):
+        while i < n and cols[i] == 0:
+            i += 1
+        head = i
+        if k == 0:
+            head0 = head
+        while i < n and cols[i] > 0:
+            i += 1
+        first_end = i
+        while i < n and cols[i] == 0:
+            i += 1
+        second = i
+        if second >= n or first_end <= head:
+            break
+        width = first_end - head
+        gap = second - first_end
+        if width >= 0.6 * band_h:
+            break
+        # 上界是这条规则的安全阀，按行高量：残片离主体最多一个行高出头
+        # （实测 16~60 px，行高 46~84 px），而纸面噪点离正文动辄两百多像素。
+        # 没有它，第一块若是噪点、第二块在两百多像素外，这一跳就把左边
+        # 一大片空白（甚至内容）整个裁掉：W04 第二行的「有」、W08 第四行的
+        # 「x=」就是这么被切没的，整行退化成"读不出算式"。
+        if gap < 1.2 * width or gap > 1.2 * band_h:
+            break
+        pos = second
+    # 一块都没跳时返回第一个墨迹块的起点，不是 0——返回 0 等于把左边
+    # 整片空白也框进来，切出的小图左边一大条灰底，识别效果反而变差。
+    return pos if pos >= 0 else (head0 if head0 < n else 0)
+
+
 def bands_to_boxes(ink: np.ndarray, bands) -> list:
     h, w = ink.shape
     boxes = []
@@ -175,7 +230,9 @@ def bands_to_boxes(ink: np.ndarray, bands) -> list:
         nz = np.where(cols > 0)[0]
         if len(nz) == 0:
             continue
-        x0, x1 = int(nz[0]), int(nz[-1]) + 1
+        x0, x1 = lead_fragment_end(cols, y1 - y0), int(nz[-1]) + 1
+        if x1 - x0 < 4:
+            continue
         pad_x = max(4, int(w * 0.02))
         pad_y = max(4, int((y1 - y0) * 0.12))
         boxes.append(
@@ -240,20 +297,114 @@ def drop_thick_blobs(ink: np.ndarray, thick_ratio: float = 0.02) -> np.ndarray:
     return ink & ~mask
 
 
-def _candidate_bands(p: np.ndarray, min_h: int) -> list[tuple[int, int]]:
-    """先粗切：投影超过 80 分位数的连续段。宁可多切几条，交给后面验收。"""
-    thr = max(3.0, float(np.percentile(p, 80)))
+def _runs_above(p: np.ndarray, thr: float, min_h: int, offset: int = 0) -> list[tuple[int, int]]:
+    """剖面里高于阈值的连续段，坐标补上 offset 换回全页。"""
     mask = p > thr
     runs, start = [], None
     for i, v in enumerate(mask):
         if v and start is None:
             start = i
         elif not v and start is not None:
-            runs.append((start, i))
+            runs.append((offset + start, offset + i))
             start = None
     if start is not None:
-        runs.append((start, len(mask)))
+        runs.append((offset + start, offset + len(mask)))
     return [b for b in runs if b[1] - b[0] >= min_h]
+
+
+def _candidate_bands(p: np.ndarray, min_h: int) -> list[tuple[int, int]]:
+    """先粗切：投影超过 80 分位数的连续段。宁可多切几条，交给后面验收。"""
+    thr = max(3.0, float(np.percentile(p, 80)))
+    return _runs_above(p, thr, min_h)
+
+
+# 补洞时，局部阈值取"这一段自身峰值"的这个比例。取 0.35 而不是 0.8：
+# 空档里如果真有字，字就是那一带最暗的东西，0.35 足以把它和纸面残留分开口；
+# 取太高的比例等于又用了一次整页阈值，那就白补了。
+_GAP_LOCAL_RATIO = 0.35
+
+
+def _fill_gaps(
+    p: np.ndarray, bands: list[tuple[int, int]], min_h: int, ink: np.ndarray | None = None
+) -> list[tuple[int, int]]:
+    """相邻行带之间空得反常的地方，用局部阈值再找一遍。
+
+    **为什么需要这一步**：`_candidate_bands` 的阈值 `percentile(p, 80)` 是整页的
+    绝对量，它默认"每一行字的墨迹量都在同一水平"。实拍不成立——同一页上手写字
+    有大有小、笔画有轻有重，后半段越写越小的作业尤其明显。实测这一页：
+
+        `⇒ y=2`、`x=1`、`∴{x=1,y=2}` 三处的投影峰值只有 20~51，
+        而上面几行是 90~145，于是 p80=50.8 把这三段整段判成"不是字"。
+
+    后果不是"少切一行"这么简单：切行少三行，`将⑤代入②` 后面就再也接不上，
+    学生写对的最终答案根本没进批改，页面显示"读过半"——**而且不报错**。
+    切行少一行比切错一行更难查，因为没有任何一处看起来是坏的。
+
+    **为什么不在全局降阈值**：阈值一降，大括号 `{` 的上半截就会被吸进上一行
+    （`{` 横跨两行，投影上是两段），识别时凭空多出一个字符。所以只在"空档明显
+    大于正常行距"的地方动，正常行距的地方一个像素都不改。
+
+    补出来的带照样要过 `page_bands` 的全部验收（贴边纸沿、过矮碎片），
+    这里只负责"再看看"，不负责"放过"。
+    """
+    if len(bands) < 2:
+        return bands
+    hs = [b - a for a, b in bands]
+    med_h = float(np.median(hs))
+    gaps = [b[0] - a[1] for a, b in zip(bands, bands[1:]) if b[0] > a[1]]
+    if not gaps:
+        return list(bands)
+    med_gap = float(np.median(gaps))
+    # 1.5 倍：正常行距的上浮（学生写得疏一点）不该触发补洞。同时给一个绝对下限
+    # `2*min_h`，避免整页只有两三条带、中位数被拉小之后到处补。
+    need = max(1.5 * med_gap, 1.5 * med_h, 2 * min_h)
+    # 地板用整页 20 分位而不是 0：空档里的纸面颗粒、笔影不该被放大成一条带。
+    floor_thr = max(3.0, 0.20 * float(np.percentile(p, 95)))
+
+    def dig(seg: np.ndarray, offset: int, lo: int, hi: int) -> list[tuple[int, int]]:
+        """在 lo..hi 这段空档里找补齐的行。
+
+        两端各自留出一点余量：紧贴空档边界的响应是相邻两条带的溢出
+        （下伸笔画、字的下沿），不是新的一行。W08 最后一行 `3` 的下沿
+        就在空档起点外 6 px 处，不剔掉的话切行数会从 4 变 5，
+        多出来的是一行孤零零的笔画。
+        """
+        if seg.size < min_h or float(seg.max()) <= floor_thr:
+            return []
+        # 用 90 分位而不是 max：空档里常常还压着纸边、桌沿这种强响应
+        # （实测这一段最大值 193.7，是正文的 3 倍）。拿 max 当基准，
+        # 阈值被顶到 67.8，真正的字（峰值 20~50）一个都过不去——补了个寂寞。
+        thr = max(floor_thr, _GAP_LOCAL_RATIO * float(np.percentile(seg, 90)))
+        pieces = _runs_above(seg, thr, min_h, offset)
+        # 作业本的横线格：`clear_long_runs` 抹掉的是"连续贯通"的长线，
+        # 手写字压在线上的地方抹不干净，剩下的断线在低阈值下正好够成一条带。
+        # 这种带的特征是横向铺满整幅——一行字不会从纸的左边写到右边。
+        # 不过滤的话，一页四行的作业会被补出十几条等距的"行"。
+        if ink is not None:
+            limit = 0.88 * ink.shape[1]
+            pieces = [b for b in pieces if np.ptp(np.where(ink[b[0]:b[1]].sum(0) > 0)[0]) < limit]
+        margin = 0.25 * med_h
+        if pieces and pieces[0][0] - lo < margin:
+            pieces = pieces[1:]
+        if pieces and hi - pieces[-1][1] < margin:
+            pieces = pieces[:-1]
+        return pieces
+
+    out: list[tuple[int, int]] = []
+    for i, b in enumerate(bands):
+        out.append(b)
+        if i + 1 >= len(bands):
+            break
+        a0, a1 = b[1], bands[i + 1][0]
+        if a1 - a0 >= need:
+            out.extend(dig(p[a0:a1], a0, a0, a1))
+
+    # 末尾也要看：最后一行下面还写着字时，这里没有下一条带当参照物，
+    # 只有"到页底这么长一段空档"本身是线索。
+    tail = len(p) - bands[-1][1]
+    if tail >= need:
+        out.extend(dig(p[bands[-1][1]:], bands[-1][1], bands[-1][1], len(p)))
+    return out
 
 
 def _band_stats(ink: np.ndarray, p: np.ndarray, bands) -> list[dict]:
@@ -287,12 +438,10 @@ def _is_frame_edge(r: dict) -> bool:
     return r["near_edge"] and r["spans_wide"]
 
 
-def page_bands(ink: np.ndarray, p: np.ndarray, min_h: int) -> list[tuple[int, int]]:
-    """整页照的行带：粗切 → 验收 → 取正文块 → 合并同一行的上下标。"""
-    rows = _band_stats(ink, p, _candidate_bands(p, min_h))
+def _accept(ink: np.ndarray, rows: list[dict]) -> list[dict]:
+    """行带验收：剔掉不像字的东西。补洞补出来的带也要过这一关。"""
     if not rows:
         return []
-
     med_h = float(np.median([r["h"] for r in rows]))
     # 横线本的格线只有十几像素高，按"页高的 1.2%"兜一个绝对下限：
     # 手写单行在 1280 px 高的照片上通常 25~90 px，格线在 10~12 px，分得开。
@@ -307,16 +456,22 @@ def page_bands(ink: np.ndarray, p: np.ndarray, min_h: int) -> list[tuple[int, in
             and r["h"] >= max(0.35 * med_h, abs_floor)
             and not r["touches_right_corner"]]      # 画面右上角的遮挡物
     if not keep:
-        return keep
+        return []
 
     # 第二轮：纸沿的硬边缘还剩一部分没贴到画面边界（W01 顶部黑边的下沿，
     # 放在 118~262 px 处，横向 0..w 全宽，峰值 195~285，正文只有 78~104）。
     # 基准不能用中位数——一半以上的带是垃圾时中位数跟着垃圾走。取 25 分位
     # 当"文字该有多亮"的估计，离群 1.8 倍以上、且横向贯通的才剔。
     base = float(np.percentile([r["peak"] for r in keep], 25))
-    keep = [r for r in keep if not (r["peak"] > 1.8 * base and r["spans_wide"])]
+    return [r for r in keep if not (r["peak"] > 1.8 * base and r["spans_wide"])]
+
+
+def page_bands(ink: np.ndarray, p: np.ndarray, min_h: int) -> list[tuple[int, int]]:
+    """整页照的行带：粗切 → 验收 → 取正文块 → 合并上下标 → 补漏掉的行。"""
+    rows = _band_stats(ink, p, _candidate_bands(p, min_h))
+    keep = _accept(ink, rows)
     if not keep:
-        return keep
+        return []
 
     # 正文块：相邻行带的间距都差不多，突然出现的大空档说明那是画面另一处的杂物
     gaps = [b["y0"] - a["y1"] for a, b in zip(keep, keep[1:])]
@@ -339,7 +494,17 @@ def page_bands(ink: np.ndarray, p: np.ndarray, min_h: int) -> list[tuple[int, in
             merged[-1]["h"] = r["y1"] - merged[-1]["y0"]
         else:
             merged.append(dict(r))
-    return [(m["y0"], m["y1"]) for m in merged]
+    bands = [(m["y0"], m["y1"]) for m in merged]
+
+    # 补洞必须放在最后。前面几步全都建立在"行距是均匀的"这个假设上——
+    # 补出来的小带会把这个基准带歪：W17 补洞后中位行距从 86 px 掉到 9.5 px，
+    # 「正文块」聚类于是把 4 行拆成 5 块、最后只剩一块 3 条碎片的带。
+    # 放到最后，聚类和合并看到的都是学生真实的行距；
+    # 补出来的带也不再走合并——它本来就是被合并规则漏掉的那一行。
+    filled = _fill_gaps(p, bands, min_h, ink)
+    if len(filled) == len(bands):
+        return filled
+    return [(r["y0"], r["y1"]) for r in _accept(ink, _band_stats(ink, p, filled))]
 
 
 def widen_boxes(boxes: list, ink, min_ink: int = 3, ratio: float = 0.32) -> list:

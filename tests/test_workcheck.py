@@ -273,3 +273,41 @@ def test_split_does_not_invent_an_answer():
     line = _read(1, "x=2y")
     assert line.kind == "equation"
     assert line.assigns == []
+
+
+def test_every_emitted_error_type_is_registered():
+    """引擎会输出的错因都要在 SEVERITY 里有位置。
+
+    没登记的标签会落到默认值，在错题本里排到"最不着急补"那一档——
+    正好反了。因式分解错就是这么漂了半年的。
+    """
+    assert "因式分解错" in cases.SEVERITY
+    # 它是"变形不等价"的一种具体形态，应该排在"答案错"前面
+    assert cases.SEVERITY["因式分解错"] < cases.SEVERITY["答案错"]
+
+
+def test_answer_written_as_a_line_of_assignments_counts():
+    """`x=2, y=1` 是学生最常见的写法，解析出来是 system 不是 assign。
+
+    不认它就等于"没写答案"——写对了也挨一句，而且结论会说"过程成立，
+    但没有最终答案"，看着像系统没看见那一行。
+    """
+    w = grade("x+y=3\nx-y=1\nx=2, y=1", problem=r"\begin{cases}x+y=3\\x-y=1\end{cases}")
+    assert w.grade == "pass", (w.grade, w.headline)
+    assert w.got == ["x=2", "y=1"]
+
+
+def test_partial_answer_in_a_system_is_still_incomplete():
+    """只写 x=2 不能算答完。"""
+    w = grade("x+y=3\nx-y=1\nx=2", problem=r"\begin{cases}x+y=3\\x-y=1\end{cases}")
+    assert w.grade == "partial"
+    assert w.error_type == "漏解"
+
+
+def test_copying_the_problem_is_not_an_answer():
+    """把题目照抄一遍不算写了答案——否则抄题就能过。"""
+    w = grade(
+        "x+y=3\nx-y=1\nx+y=3, x-y=1",
+        problem=r"\begin{cases}x+y=3\\x-y=1\end{cases}",
+    )
+    assert w.grade != "pass", (w.grade, w.headline)

@@ -70,7 +70,7 @@ _UNKNOWN_NAMES = ("x", "y", "z")
 
 # 缓存版本号。判据一改就必须升版本，否则会拿旧结论回答新问题——
 # 这种错最隐蔽：结果看起来正常，只是它是上一版算法算的。
-CACHE_VERSION = "eq-answer-v5"  # v5：解析层能读 aligned/带逗号 cases，题面归一结果变了
+CACHE_VERSION = "eq-answer-v9"  # v9：含参分支补齐（Δ>0 不再因试值不够被删）＋分式定义域
 
 _CJK = re.compile(r"[\u4e00-\u9fff]+")
 _TEXTLABEL = re.compile(r"\\text\{[^{}]*\}")
@@ -204,6 +204,12 @@ def classify(pe: ParsedExpr) -> Topic:
 
     deg = _degree(num, main)
 
+    # 根式必须在「次数」之前判：`sqrt(x+1)=x-1` 不是多项式，_degree 给 -1，
+    # 落到下面就会报「非多项式（三角/指数/对数）」——明明是无理方程，
+    # 却说成不做三角题，用户只会以为它在乱推。
+    if rad_has_var:
+        return Topic("radical", EDGE["radical"], "edge", deg, vars_,
+                     "含根号，两边平方可能引入增根，已逐根代回验算")
     if deg < 0:
         return Topic("nonpoly", OUT["nonpoly"], "out", -1, vars_,
                      "化简后不是多项式（三角 / 指数 / 对数这类），本工具不做")
@@ -440,6 +446,7 @@ class Answer:
     checks: list[str] = field(default_factory=list)
     dropped: list[str] = field(default_factory=list)
     branches: list[str] = field(default_factory=list)   # 含参方程的分情形答案
+    derivation: list[dict] = field(default_factory=list)  # 配方法推导（含参二次才有）
     explain: str = ""
     note: str = ""
     source: str = "text"
@@ -457,6 +464,7 @@ class Answer:
             "solutions": self.solutions,
             "answer_latex": self.answer_latex,
             "branches": self.branches,
+            "derivation": self.derivation,
             "checks": self.checks,
             "dropped": self.dropped,
             "explain": self.explain,
@@ -493,6 +501,8 @@ def _from_cache(ans: Answer, hit: dict) -> None:
     ans.checks = list(hit.get("checks") or [])
     ans.dropped = list(hit.get("dropped") or [])
     ans.branches = list(hit.get("branches") or [])
+    ans.derivation = list(hit.get("derivation") or [])
+    ans.note = hit.get("note") or ""
     ans.answer_latex = hit.get("answer_latex") or ""
     ans.explain = hit.get("explain") or ""
 
@@ -505,6 +515,27 @@ def _fix_param_note(ans: Answer) -> None:
     if ans.topic.kind == "param" and not ans.branches:
         names = "、".join(ans.topic.vars or [])
         ans.note = f"解里带着参数 {names}，但不需要分情形讨论"
+
+
+def vars_text(topic) -> str:
+    """「未知数 x · 参数 a、b、c」。
+
+    含参方程里把参数也叫「未知数」是错的。题面明写「a,b,c 均为常数」，
+    界面却说它有四个未知数，用户第一反应是"这系统连题都没看懂"。
+    """
+    names = list(getattr(topic, "vars", None) or [])
+    if not names:
+        return ""
+    if getattr(topic, "kind", "") != "param":
+        return f"未知数 {'、'.join(names)}"
+    main = [v for v in names if v in _UNKNOWN_NAMES]
+    params = [v for v in names if v not in _UNKNOWN_NAMES]
+    bits = []
+    if main:
+        bits.append(f"未知数 {'、'.join(main)}")
+    if params:
+        bits.append(f"参数 {'、'.join(params)}")
+    return " · ".join(bits)
 
 
 def _lin_show(expr, var) -> str:
@@ -1078,6 +1109,21 @@ def answer(
         # 界面上必须一支一行——漏掉的那一支就在这种地方被漏看。
         ans.branches = _branches(sr.solutions)
         ans.answer_latex = ""
+        # 判完情形才谈得上「凭什么」：ax²+bx+c=0 这种，光给六支结论
+        # 回答不了「求根公式怎么来的」。推导自带逐级验算，验不过就不给。
+        t_dv = time.time()
+        try:
+            from .derive import complete_square
+
+            dv = complete_square(*pe.obj[0])
+            if dv is not None and dv.ok:
+                ans.derivation = [
+                    {"title": s.title, "latex": s.latex} for s in dv.steps
+                ]
+                ans.note = dv.note
+        except Exception:  # noqa: BLE001
+            pass      # 推导是加分项，坏了不能连答案一起吞掉
+        ans.timings["derive"] = time.time() - t_dv
     elif sr.ok:
         ans.answer_latex = solve_summary(sr).replace("解：", "")
     elif empty_set:
@@ -1107,6 +1153,8 @@ def answer(
                 "checks": ans.checks,
                 "dropped": ans.dropped,
                 "branches": ans.branches,
+                "derivation": ans.derivation,
+                "note": ans.note,
                 "answer_latex": ans.answer_latex,
                 "explain": ans.explain,
             },

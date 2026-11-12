@@ -16,6 +16,7 @@ from mathagent.photocheck import (
     PhotoCheck,
     _apply_uncertainty,
     _canon,
+    _judge,
     _vote,
     readable,
 )
@@ -402,3 +403,304 @@ def test_leading_digit_does_not_excuse_a_real_coefficient_error():
     work = grade(["x^{2}=4", "2x^{2}=9"])
     photocheck._soften_digit_accusations(work)
     assert any(s.verdict == "wrong" for s in work.steps)
+
+
+# ---------------------------------------------------------------- 行尾编号与残片
+#
+# 学生给每一步编号是常态（"③-①得：5y=10 ④"），编号不是数学内容。
+# 留着它的代价比想象中大：两个来源对同一行各读各的、本该由「按数学一致性裁决」
+# 按"哪个接得上邻行"裁掉——而它要先把候选解析成表达式。
+# 行尾多个 ②，`x+3y=7②` 就解析不了，裁决静默失效，整行退回"待核对"。
+
+
+@pytest.mark.parametrize("raw, want", [
+    ("x+3y=7\\quad\\text{②}", "x+3y=7"),
+    ("x+3y=7\\quad(2)", "x+3y=7"),
+    ("y = 2 \\textcircled{5}", "y = 2"),
+    ("2. x + 6y = 14 \\tag{3}", "2. x + 6y = 14"),
+    ("(3)-(1)\\text{得}:\\ 5y=10\\ (4)", "(3)-(1)得: 5y=10"),
+    ("`7y=2`", "7y=2"),
+])
+def test_tail_marks_are_stripped(raw, want):
+    assert readable(raw) == want
+
+
+def test_bracketed_number_that_is_content_is_kept():
+    """`x=2(3)` 里的 (3) 是乘 3，剥掉就把答案从 6 改成 2 了。"""
+    assert readable("x=2(3)") == "x=2(3)"
+    assert readable("(x-2)(x-3)=0") == "(x-2)(x-3)=0"
+
+
+def test_lone_leading_one_is_dropped():
+    """行首孤立的系数 1 与式子等价；它多半是上一行 `}` 的右半截被读成了数字。"""
+    assert readable("1y=2") == "y=2"
+    assert readable("1x+3y=7") == "x+3y=7"
+    # 但不能碰这些：1 不是孤立的系数
+    assert readable("12x=4") == "12x=4"
+    assert readable("1.5x=3") == "1.5x=3"
+    assert readable("1 = 2") == "1 = 2"
+
+
+# ---------------------------------------------------------------- 行尾编号与残片
+#
+# 学生给每一步编号是常态（"③-①得：5y=10 ④"），编号不是数学内容。
+# 留着它的代价比想象中大：两个来源对同一行各读各的、本该由「按数学一致性裁决」
+# 按"哪个接得上邻行"裁掉——而它要先把候选解析成表达式。
+# 行尾多个 ②，`x+3y=7②` 就解析不了，裁决静默失效，整行退回"待核对"。
+
+
+@pytest.mark.parametrize("raw, want", [
+    (r"x+3y=7\quad\text{②}", "x+3y=7"),
+    (r"x+3y=7\quad(2)", "x+3y=7"),
+    (r"y = 2 \textcircled{5}", "y = 2"),
+    (r"2. x + 6y = 14 \tag{3}", "2. x + 6y = 14"),
+    (r"(3)-(1)\text{得}:\ 5y=10\ (4)", "(3)-(1)得: 5y=10"),
+    ("`7y=2`", "7y=2"),
+])
+def test_tail_marks_are_stripped(raw, want):
+    assert readable(raw) == want
+
+
+def test_bracketed_number_that_is_content_is_kept():
+    """`x=2(3)` 里的 (3) 是乘 3，剥掉就把答案从 6 改成 2 了。"""
+    assert readable("x=2(3)") == "x=2(3)"
+    assert readable("(x-2)(x-3)=0") == "(x-2)(x-3)=0"
+
+
+def test_lone_leading_one_is_dropped():
+    """行首孤立的系数 1 与式子等价；它多半是上一行 `}` 的右半截被读成了数字。"""
+    assert readable("1y=2") == "y=2"
+    assert readable("1x+3y=7") == "x+3y=7"
+    # 但不能碰这些：1 不是孤立的系数
+    assert readable("12x=4") == "12x=4"
+    assert readable("1.5x=3") == "1.5x=3"
+    assert readable("1 = 2") == "1 = 2"
+
+
+# ---------------------------------------------------------------- 手动补识别
+#
+# 识别不可能百分之百。这里的做法是：切行必须切全（缺行是静默失败，见 test_page_split），
+# 但认不出的行**允许认不出**，由用户在预填文本里改成自己写的式子，再判一次。
+#
+# 关键的一条不是"能改"，而是**没改的行不许被顺手确认**：
+# `y=2` 被读成 `7y=2` 时，用户只改了别的行、这一行原样留着，要是当成他写的，
+# 接下来判出来的"不成立"全是冤案。
+#
+# 拆成三条判据，缺一条这套机制就会说谎：
+#   1. 改了 → 按用户给的式子判，并在结论里点名"这行是手输的"；
+#   2. 没改也没勾 → 保持系统原来的把握（窟窿还是窟窿）；
+#   3. 没改但勾了核对 → 按用户确认的读法判（原文本来就对，只是来源没谈拢）。
+
+
+def _page(lines, problem=""):
+    """按 (行号, 判定, 把握, 文本) 造一份识别结果，再照真实链路判一次。"""
+    from mathagent.workcheck import grade
+
+    reads = [
+        LineRead(index=i, latex=t, text=t, verdict=v, confidence=c, sources=["qwen"])
+        for i, v, c, t in lines
+    ]
+    return PhotoCheck(
+        work=grade([r.text for r in reads], problem=problem), lines=reads, page="p.jpg"
+    )
+
+
+SYSTEM_PAGE = [
+    (1, "review", 0.5, "2x+y=4"),
+    (2, "ok", 1.0, "x+3y=7"),
+    (3, "prose", 0.5, "②两边同时乘2得："),
+    (4, "ok", 0.8, "2x+6y=14"),
+    (5, "review", 0.5, "5y=10"),
+    (6, "ok", 1.0, "y = 2"),
+    (7, "prose", 0.5, "将①代入②得："),
+    (8, "ok", 0.8, "x=1"),
+    (9, "review", 0.5, "7 y = 2"),
+]
+
+
+def test_edit_text_keeps_the_original_line_numbers():
+    """行号是回来对齐用的：改完只剩八行，系统还得知道哪行是原来的第 10 行。"""
+    pc = _page(SYSTEM_PAGE)
+    text = photocheck.edit_text(pc)
+    assert text.splitlines()[0] == "1. 2x+y=4"
+    assert text.splitlines()[-1] == "9. 7 y = 2"
+
+
+def test_manual_fix_turns_a_hole_into_a_judged_line():
+    pc = _page(SYSTEM_PAGE)
+    fixed = photocheck.edit_text(pc).replace("9. 7 y = 2", "9. y=2")
+    out = photocheck.regrade(pc, fixed, confirm={1, 5})
+    assert out.work.grade == "pass", out.work.verdict
+    last = [s for s in out.work.steps if s.idx == 9][0]
+    assert last.verdict == "ok", last.row
+    joined = " ".join(out.notes)
+    assert "第 9 行是你手动输入的" in joined
+
+
+def test_untouched_unsure_line_stays_a_hole():
+    """只改一行，别的没认准的行不许跟着变成"已确认"。"""
+    pc = _page(SYSTEM_PAGE)
+    fixed = photocheck.edit_text(pc).replace("9. 7 y = 2", "9. y=2")
+    out = photocheck.regrade(pc, fixed)
+    assert out.work.grade == "unread", out.work.headline
+    assert [lr.index for lr in out.lines if not lr.sure] == [1, 5]
+
+
+def test_confirmed_line_is_trusted_without_editing():
+    """原文本来就对、只是两个来源没谈拢：勾一下就该按它算。"""
+    pc = _page(SYSTEM_PAGE)
+    fixed = photocheck.edit_text(pc).replace("9. 7 y = 2", "9. y=2")
+    out = photocheck.regrade(pc, fixed, confirm={1, 5})
+    assert out.work.grade == "pass"
+    assert "第 1、5 行你核对过、没改动" in " ".join(out.notes)
+
+
+def test_manual_line_is_never_dressed_up_as_recognized():
+    """手输的行不能标成系统认出来的——那是把用户的判断算成自己的功劳。"""
+    pc = _page(SYSTEM_PAGE)
+    fixed = photocheck.edit_text(pc).replace("9. 7 y = 2", "9. y=2")
+    out = photocheck.regrade(pc, fixed, confirm={1, 5})
+    touched = [lr for lr in out.lines if photocheck.MANUAL_SOURCE in lr.sources]
+    assert [lr.index for lr in touched] == [9]
+    assert touched[0].text == "y=2"
+
+
+def test_manual_fix_of_the_problem_line_moves_the_criterion():
+    """改的正好是题面那一行时，判定必须按改过的题算。
+
+    这是手改最容易踩的一脚：题面被认成 `x²-5x+7=0`，学生写 `x=2`、`x=3`。
+    用户把题面改成 `x²-5x+6=0`——那学生全对。可如果判定还捧着旧题面，
+    结论会是「过程成立，但解不全，少了两个复根」：改对了反而判得更离谱。
+    """
+    pc = _judge(
+        [
+            LineRead(index=1, text="x^2-5x+7=0", verdict="ok", confidence=0.9, sources=["qwen"]),
+            LineRead(index=2, text="x=2 或 x=3", verdict="ok", confidence=0.9, sources=["qwen"]),
+        ],
+        problem="",
+        page="p.jpg",
+    )
+    assert pc.problem_line == 1
+    assert pc.work.grade == "wrong"
+
+    fixed = photocheck.edit_text(pc).replace("x^2-5x+7=0", "x^2-5x+6=0")
+    out = photocheck.regrade(pc, fixed)
+    assert out.work.problem == "x^2-5x+6=0", out.work.problem
+    assert out.work.grade == "pass", (out.work.grade, out.work.headline)
+    # 题面那一行是用户给的，结论里必须点名它同时充当了判定基准
+    assert "同时被当作题面" in " ".join(out.notes)
+
+
+def test_problem_line_keeps_tracking_across_two_rounds():
+    """连改两次也要跟得上：第二次不能又退回第一次的题面。"""
+    pc = _judge(
+        [
+            LineRead(index=1, text="x^2-5x+7=0", verdict="ok", confidence=0.9, sources=["qwen"]),
+            LineRead(index=2, text="x=2 或 x=3", verdict="ok", confidence=0.9, sources=["qwen"]),
+        ],
+        problem="",
+        page="p.jpg",
+    )
+    one = photocheck.regrade(pc, photocheck.edit_text(pc).replace("x^2-5x+7=0", "x^2-5x+6=0"))
+    two = photocheck.regrade(one, photocheck.edit_text(one).replace("x^2-5x+6=0", "x^2-5x+8=0"))
+    assert two.work.problem == "x^2-5x+8=0", two.work.problem
+    assert two.work.grade != "pass"
+
+
+def test_deleting_the_problem_line_keeps_the_old_problem_and_says_so():
+    """题面那一行被删掉：没有新题面可依，退回原题面，但必须说明。"""
+    pc = _judge(
+        [
+            LineRead(index=1, text="x^2-5x+7=0", verdict="ok", confidence=0.9, sources=["qwen"]),
+            LineRead(index=2, text="x=2 或 x=3", verdict="ok", confidence=0.9, sources=["qwen"]),
+        ],
+        problem="",
+        page="p.jpg",
+    )
+    out = photocheck.regrade(pc, "2. x=2 或 x=3")
+    assert out.work.problem == "x^2-5x+7=0"
+    assert "原来是题面" in " ".join(out.notes)
+
+
+def test_explicit_problem_still_wins_over_the_misread_line():
+    """用户在题面输入框里填了题，就不该再被某一行抢过去。"""
+    pc = _judge(
+        [
+            LineRead(index=1, text="x^2-5x+7=0", verdict="ok", confidence=0.9, sources=["qwen"]),
+            LineRead(index=2, text="x=2 或 x=3", verdict="ok", confidence=0.9, sources=["qwen"]),
+        ],
+        problem="x^2-5x+6=0",
+        page="p.jpg",
+    )
+    out = photocheck.regrade(pc, photocheck.edit_text(pc))
+    assert out.work.problem == "x^2-5x+6=0"
+    # 页面上那一行仍是认错的题面抄写，不该被当成新题面顶掉用户填的题
+    assert any(lr.text == "x^2-5x+7=0" for lr in out.lines)
+
+
+def test_unread_problem_line_withdraws_the_whole_verdict():
+    """题面没认准时不许下结论。
+
+    标准解和每一处"和题对不上"都是相对题面算的。题面悬空，"你这一步错了"
+    就只是一串看着确定的猜测；"伪推导"这种指控更是完全靠标准解撑着。
+    """
+    pc = _judge(
+        [
+            LineRead(index=1, text="x^2-5x+7=0", verdict="review", confidence=0.5, sources=["qwen"]),
+            LineRead(index=2, text="x=2 或 x=3", verdict="ok", confidence=0.9, sources=["qwen"]),
+        ],
+        problem="",
+        page="p.jpg",
+    )
+    assert pc.problem_line == 1
+    assert pc.work.grade == "unread", pc.work.headline
+    assert "题面" in pc.work.headline
+    assert pc.work.expected == [] and pc.work.error_type == ""
+    assert not any(s.verdict in ("wrong", "partial") for s in pc.work.steps)
+    assert "题面" in " ".join(pc.notes)
+
+
+def test_confident_problem_line_keeps_normal_grading():
+    """题面认准了，该判的照判——这条护栏不能变成"一律不判"。"""
+    pc = _judge(
+        [
+            LineRead(index=1, text="x^2-5x+6=0", verdict="ok", confidence=0.95, sources=["qwen"]),
+            LineRead(index=2, text="x=2 或 x=3", verdict="ok", confidence=0.95, sources=["qwen"]),
+        ],
+        problem="",
+        page="p.jpg",
+    )
+    assert pc.work.grade == "pass", pc.work.headline
+
+
+def test_placeholder_left_alone_is_still_unread():
+    """留着 `?` 就是承认没读出来，不能当成用户给了内容。"""
+    pc = _page([(1, "ok", 1.0, "x+1=3"), (2, "failed", 0.0, "")])
+    out = photocheck.regrade(pc, "1. x+1=3\n2. ?")
+    assert out.work.grade == "unread"
+
+
+def test_text_without_line_numbers_falls_back_to_position():
+    """用户把行号删干净了，就按顺序对应——总比全部当成新行更接近他的本意。"""
+    pc = _page([(1, "ok", 1.0, "x+1=3"), (2, "review", 0.5, "x=2")])
+    out = photocheck.regrade(pc, "x+1=3\nx=2", confirm={2})
+    assert out.work.grade != "unread"
+    assert out.lines[1].sure
+
+
+def test_deleted_line_is_reported():
+    pc = _page(SYSTEM_PAGE)
+    text = "\n".join(
+        ln for ln in photocheck.edit_text(pc).splitlines() if not ln.startswith("9. ")
+    )
+    out = photocheck.regrade(pc, text, confirm={1, 5})
+    assert any("第 9 行没出现在你给的过程里" in n for n in out.notes)
+
+
+def test_regrade_does_not_mutate_the_original_result():
+    """重判要能反复点：改一次再改一次，不能把上一轮的结果叠进去。"""
+    pc = _page(SYSTEM_PAGE)
+    before = [(lr.index, lr.text, lr.verdict) for lr in pc.lines]
+    photocheck.regrade(pc, photocheck.edit_text(pc).replace("9. 7 y = 2", "9. y=2"))
+    after = [(lr.index, lr.text, lr.verdict) for lr in pc.lines]
+    assert before == after

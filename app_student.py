@@ -20,7 +20,7 @@ import re
 
 import gradio as gr
 
-from mathagent import equations, photocheck, workcheck
+from mathagent import equations, guard, photocheck, workcheck
 from mathagent.types import WorkCheck
 
 LATEX_DELIMS = [
@@ -246,7 +246,8 @@ def _cover_md(ans) -> str:
     if t.coverage == "in":
         return ""
     word = "能答，但要说清边界" if t.coverage == "edge" else "不在这个题型的范围里"
-    detail = t.label + (f" · 未知数 {'、'.join(t.vars)}" if t.vars else "")
+    vt = equations.vars_text(t)
+    detail = t.label + (f" · {vt}" if vt else "")
     extra = ans.note or t.note or ans.error or ""
     return f"> **{word}** · {detail}\n>\n> {extra}"
 
@@ -274,9 +275,28 @@ def _answer_md(ans) -> str:
     return "\n".join(out)
 
 
-def _steps_md(ans) -> str:
-    if not ans.steps:
+def _derive_md(ans) -> str:
+    """配方法推导。只有「二次项系数带字母」的方程才有这一段。
+
+    单独一章而不是塞进「怎么算的」：求解是从题到答案，推导是从公式到公式，
+    两件事混在一起，学生会以为每道题都得先配一遍方。
+    """
+    dv = getattr(ans, "derivation", None) or []
+    if not dv:
         return ""
+    out = ["### 求根公式怎么推出来的\n"]
+    out.append("> 配方法。中间几步都是两边同除、同加，和上一步同解；"
+               "开方带回 ±，两支都代回原方程验过。\n")
+    for i, st in enumerate(dv, 1):
+        out.append(f"**{i}　{st['title']}**\n")
+        out.append(f"$${st['latex']}$$")
+    return "\n".join(out)
+
+
+def _steps_md(ans) -> str:
+    head = _derive_md(ans)
+    if not ans.steps:
+        return head
     out = ["### 怎么算的\n"]
     for i, st in enumerate(ans.steps, 1):
         out.append(f"**{i}　{st['title']}**\n")
@@ -284,7 +304,7 @@ def _steps_md(ans) -> str:
     body = "\n".join(out)
     if ans.explain:
         body += "\n\n### 为什么这么算\n\n" + ans.explain
-    return body
+    return f"{head}\n\n{body}" if head else body
 
 
 def _meta_md(meta: dict | None, ans) -> str:
@@ -305,10 +325,18 @@ def _assign_cell(raw: str) -> str:
 
     `$x=-1\\quad x=6$` 整个交给 KaTeX，空格会被吞掉，显示成 `x=-1x=6`——
     看上去像学生把两个答案连写成了一个式子。拆成两个 $..$ 才看得清是"两个答案"。
+
+    分隔符只认真正用来分答案的那几个（`\\quad`、逗号、分号、"或"），
+    **不认普通空格**：`y = 2` 里的空格是式子自己的排版，按空格拆会显示成
+    「y，=，2」——一行正确的手写被拆成三个符号，比不拆更让人怀疑系统。
     """
-    parts = [p for p in re.split(r"\\qquad|\\quad|\\[,;! ]|\s+", raw) if p]
+    parts = [
+        p.strip()
+        for p in re.split(r"\\qquad|\\quad|\\[,;! ]|[，,;；]|或", raw)
+        if p.strip()
+    ]
     if len(parts) <= 1:
-        return f"${raw}$"
+        return f"${raw.strip()}$"
     return "，".join(f"${p}$" for p in parts)
 
 
@@ -352,10 +380,15 @@ def _reads_md(pc) -> str:
     if not pc.lines:
         return "_这一页没有切出任何一行。_"
     out = ["### 我看到了什么\n", pc.read_table_md()]
+    manual = [x.index for x in pc.lines if photocheck.MANUAL_SOURCE in x.sources]
     bad = [x for x in pc.lines if not x.sure]
+    if manual:
+        out.append(f"> 第 {'、'.join(str(i) for i in manual)} 行是你手动输入并确认过的，"
+                   "表里按你写的式子判。")
     if bad:
         out.append(f"> 第 {'、'.join(str(x.index) for x in bad)} 行没认准，"
-                   "它们在批改表里是「待核对」，不算你错。")
+                   "它们在批改表里是「待核对」，不算你错。"
+                   "可以在下面「有行没认准」框里直接改成你写的样子，再判一次。")
     return "\n".join(out)
 
 
@@ -389,6 +422,23 @@ def run_answer(text, image, explain, progress=gr.Progress()):
     return _cover_md(ans), _answer_md(ans), _steps_md(ans), _meta_md(meta, ans)
 
 
+def _doubt_choices(pc) -> list[str]:
+    """没认准的行，做成勾选项：`6. y = z`。行号在前，回来才认得出是哪一行。"""
+    return [
+        f"{x.index}. {x.text or '（没读出来）'}" for x in pc.lines if not x.sure
+    ]
+
+
+def _confirm_ids(labels) -> set[int]:
+    """把勾选的标签还原成原行号。"""
+    out: set[int] = set()
+    for s in labels or []:
+        m = re.match(r"\s*(\d{1,2})\s*[.、]", str(s))
+        if m:
+            out.add(int(m.group(1)))
+    return out
+
+
 def run_check(problem, text, image, progress=gr.Progress()):
     w = (text or "").strip()
     if not w and not image:
@@ -404,8 +454,41 @@ def run_check(problem, text, image, progress=gr.Progress()):
                 _advice_md(check),
                 "",
                 "",
+                gr.update(value="", visible=False),
+                gr.update(visible=False),
+                gr.update(choices=[], value=[], visible=False),
+                None,
             )
         pc = photocheck.check(image, problem=problem or "")
+    except Exception as exc:  # noqa: BLE001
+        raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
+    progress(1.0, desc="好了")
+    doubt = _doubt_choices(pc)
+    has_photo = bool(pc.lines)
+    return (
+        _verdict_html(pc.work, _scope_note(problem or pc.work.problem)),
+        _table_md(pc.work),
+        _advice_md(pc.work),
+        _reads_md(pc),
+        pc.lines_html(),
+        gr.update(value=photocheck.edit_text(pc), visible=has_photo),
+        gr.update(visible=has_photo),
+        gr.update(choices=doubt, value=[], visible=bool(doubt)),
+        pc,
+    )
+
+
+def run_regrade(fix_text, doubted, problem, state, progress=gr.Progress()):
+    """按用户改过 / 核对过的过程重判。不重新识别，所以几秒就出结果。"""
+    if state is None:
+        raise gr.Error("先拍一张过程照片批改一次，再来改")
+    if not (fix_text or "").strip():
+        raise gr.Error("过程是空的。想删掉某一行，删那一行就行，别整段清空")
+    progress(0.3, desc="按你给的过程重算")
+    try:
+        pc = photocheck.regrade(
+            state, fix_text, confirm=_confirm_ids(doubted), problem=problem or ""
+        )
     except Exception as exc:  # noqa: BLE001
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
     progress(1.0, desc="好了")
@@ -482,9 +565,28 @@ with gr.Blocks(title="方程") as demo:
                 "</div>")
             c_rows = gr.Markdown(latex_delimiters=LATEX_DELIMS)
             c_advice = gr.Markdown(latex_delimiters=LATEX_DELIMS)
+            with gr.Column(visible=False, elem_id="fixbox") as c_fixbox:
+                gr.Markdown(
+                    "### 有行没认准？直接改成你写的\n"
+                    "下面每行前面的数字是照片上的行号。把认错的行改成你写的式子"
+                    "（`^` 表示乘方，比如 `x^2`），点下面的按钮重判——"
+                    "**不会重新识别**，改哪行算哪行。\n\n"
+                    "认不出的行留着一个 `?`，把它替换掉就行。"
+                    "整行删掉＝这行不算；漏切的行，在它该在的位置补一行（**前面不写数字**）。"
+                )
+                c_fix = gr.Textbox(
+                    label="逐行过程（可改）", lines=10, visible=False,
+                    placeholder="1. 2x+y=4\n2. x+3y=7",
+                )
+                c_doubt = gr.CheckboxGroup(
+                    label="上面这几行系统没认准。核对后没错的，勾上（按这个读法算）",
+                    choices=[], visible=False, elem_classes=["bare"],
+                )
+                c_fix_go = gr.Button("按我改的重新判", variant="secondary")
             c_reads = gr.Markdown(latex_delimiters=LATEX_DELIMS)
             with gr.Column(elem_id="lineimgs"):
                 c_lines = gr.HTML()
+            c_state = gr.State(None)
 
     b_answer.click(lambda: "answer", None, mode).then(
         switch, mode, [b_answer, b_check, pane_answer, pane_check])
@@ -500,10 +602,15 @@ with gr.Blocks(title="方程") as demo:
                   [a_cover, a_ans, a_steps, a_meta])
 
     c_go.click(run_check, [c_problem, c_text, c_image],
-               [c_verdict, c_rows, c_advice, c_reads, c_lines])
+               [c_verdict, c_rows, c_advice, c_reads, c_lines,
+                c_fix, c_fixbox, c_doubt, c_state])
+    c_fix_go.click(run_regrade, [c_fix, c_doubt, c_problem, c_state],
+                   [c_verdict, c_rows, c_advice, c_reads, c_lines])
 
 
 if __name__ == "__main__":
+    # 先把超时守卫的子进程拉起来，省掉第一页的 1 秒等待（后台线程，不挡启动）。
+    guard.warmup()
     demo.queue().launch(
         css=CSS,
         theme=gr.themes.Base(),

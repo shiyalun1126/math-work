@@ -97,3 +97,34 @@ def test_general_quadratic_has_all_six_cases():
     text = cases(run(r"ax^2+bx+c=0"))
     assert "任意实数" in text, text
     assert "b \\ne 0" in text and "c \\ne 0" in text, text
+
+
+def test_far_boundary_branch_is_not_dropped():
+    """x²-a+100=0：Δ>0 要求 a>100，试值池里没有这么大的数。
+
+    "没找到见证"曾被当成"这一支不存在"，于是 a=101 时的两个实根整个丢了。
+    现在从不等式本身取点（101），三支齐全。
+    """
+    text = cases(run(r"x^2-a+100=0"))
+    assert "Δ > 0" in text or r"\Delta > 0" in text, text
+    assert "sqrt{a - 100}" in text.replace(r"\sqrt", "sqrt"), text
+    assert "无实根" in text, text
+    # Δ=0 那一支是 x=0（a=100 时重根）
+    assert "x = 0" in text, text
+
+
+def test_impossible_branch_is_still_removed():
+    """补上"不知道就保留"之后，证得出来的假分支还得删。
+
+    `a x²+(a-1)x-1=0` 里 A=0 与 B=0 互相矛盾，那支"a=0 且 b=0 且 c≠0"不能留在答案里。
+    """
+    text = cases(run(r"a x^2 + (a-1) x - 1 = 0"))
+    assert text.count("无解") == 0, text
+
+
+def test_branch_kept_without_witness_is_marked():
+    """真的核实不了的情形要保留并说明，不能悄悄删、也不能假装验过。"""
+    sr = run(r"x^2-a+100=0")
+    for n in sr.steps:
+        if "验算" in n.title:
+            assert "a=101" in n.latex, n.latex

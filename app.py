@@ -11,7 +11,7 @@ import os
 
 import gradio as gr
 
-from mathagent import cases, config, photocheck, pipeline, workcheck
+from mathagent import cases, config, guard, photocheck, pipeline, workcheck
 from mathagent.latex import parse as parse_latex
 from mathagent.perceive import probe_all
 from mathagent.route import plain as route_plain
@@ -927,6 +927,8 @@ with gr.Blocks(title="手写数学识别 Agent · MVP") as demo:
 
 
 if __name__ == "__main__":
+    # 先把超时守卫的子进程拉起来，省掉第一页的 1 秒等待（后台线程，不挡启动）。
+    guard.warmup()
     demo.queue().launch(
         theme=gr.themes.Default(primary_hue="teal", neutral_hue="gray"),
         css=CSS,

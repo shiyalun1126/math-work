@@ -26,6 +26,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Iterable
 
 import sympy
 
@@ -52,7 +53,19 @@ PLACEHOLDER = "?"
 # 四十行就是一整分钟的等待和一笔不小的额度，这种时候该提醒用户分页拍。
 MAX_LINES = 24
 
+# 人工改过的行，`sources` 里记这一条。它不是"识别来源"，是为了让界面和批改层
+# 都能一眼看出哪几行是用户自己给的——那几行的对错不由系统负责。
+MANUAL_SOURCE = "手输"
+# 用户核对过、但一个字没改的行（原文本来就对，只是系统没把握）。
+# 与 `手输` 分开记，是因为这两件事的保证不一样：一个是"我告诉系统写的是什么"，
+# 一个是"系统看对了，我确认过"。
+CONFIRM_SOURCE = "核对"
+
 WORK_DIR = config.ROOT / "data" / "work"
+
+# 行号前缀：`3. y=2`。只给人对照用，`workcheck._ENUM` 在解析前会剥掉；
+# 万一人把它删了也没关系，`_split_edits` 会退回"按位置对应"。
+_EDIT_NUM = re.compile(r"^\s*(\d{1,2})\s*[.、)）:：]\s*(.*)$")
 
 
 @dataclass
@@ -115,6 +128,10 @@ class PhotoCheck:
     split_note: str = ""
     notes: list[str] = field(default_factory=list)
     timings: dict[str, float] = field(default_factory=dict)
+    # 题面取自第几行（1 基；0 表示题面不是从某一行来的）。
+    # 记下来是为了手改时能跟着改：用户把题面那一行的 `7` 改成 `6`，
+    # 判定必须按改过的题算，不能还拿旧的。
+    problem_line: int = 0
 
     @property
     def n_unread(self) -> int:
@@ -249,6 +266,37 @@ def _strip_derive_marks(s: str) -> str:
     return s
 
 
+# 行尾的步骤编号：①…⑳、`\textcircled{5}`、`\tag{3}`、`(4)`。
+#
+# 学生给每一步编号是常态（"③-①得：5y=10 ④"），但编号不是数学内容。
+# 留着它的代价比想象中大：这一页两派识别对这一行各读各的，
+# 本该由 `_tiebreak_by_math` 按"哪个接得上邻行"裁掉——
+# 而它要先把候选解析成表达式。行尾多个 ②，`x+3y=7②` 就解析不了，
+# 裁决静默失效，整行退回"待核对"。识别明明有两个来源，却一条都对不上账。
+_TAIL_MARK = re.compile(
+    r"(?:"
+    r"\\tag\*?\{[^{}]*\}"
+    r"|\\textcircled\{[^{}]*\}"
+    r"|[\u2460-\u2473]"                       # ①..⑳
+    # `(4)` 前面必须有空白才算编号：`5y=10 (4)` 是编号，
+    # 而 `x=2(3)` 里的 (3) 是乘 3，剥掉就把答案从 6 改成 2 了。
+    r"|(?<=\s)[（(]\s*\d{1,2}\s*[)）]"
+    r")\s*$"
+)
+
+
+def _strip_tail_marks(s: str) -> str:
+    """剥行尾编号，允许连着剥几个（"… ③ ④"这种写两遍的）。"""
+    for _ in range(3):
+        # 编号前面常有一个排版用的强制空格 `\ (4)`，剥掉编号后剩个光秃秃的
+        # 反斜杠——它自己就是一个不合法的 LaTeX 命令，照样让整行解析失败。
+        new = _TAIL_MARK.sub("", s).rstrip(" \\")
+        if new == s:
+            break
+        s = new
+    return s
+
+
 def readable(latex: str) -> str:
     """把一条识别结果还原成"能再喂回解析器"的文字。
 
@@ -259,6 +307,9 @@ def readable(latex: str) -> str:
     s = (latex or "").strip()
     if not s:
         return ""
+    # 有些来源会用 markdown 包一层代码格式：`` `7y=2` ``。
+    # 反引号不是数学符号，留着会让整行解析失败。
+    s = s.strip("`").strip()
     # 整行被包在 \[...\]、$...$ 里：外层是排版标记，不是内容
     for left, right in _PAIRS:
         if s.startswith(left) and s.endswith(right) and len(s) > len(left) + len(right):
@@ -277,11 +328,19 @@ def readable(latex: str) -> str:
     s = re.sub(r"\\[,;:!]", " ", s)
     s = re.sub(r"\\\s", " ", s)          # `\ ` 是排版用的强制空格，没有数学含义
     s = re.sub(r"\\(?:quad|qquad)", " ", s)
+    # 编号放在最后剥。模型写的是 `\text{①}`、`\quad ①`、`\quad(2)`，
+    # 前面几步没走完时末尾还是个 `}` 或反斜杠，正则够不着，编号就整个留在式子里，
+    # 解析和"按数学一致性裁决"跟着一起失效。这一步必须看到剥干净后的样子。
+    s = _strip_tail_marks(s)
     s = re.sub(r"[ \t]{2,}", " ", s).strip()
     # 行首孤立的右括号：学生爱用一个大括号把连着几步括在一起，切行时
     # 右半边落进了下一行开头（W05 第二行 `)x²-6=5x`）。它不是算式的一部分，
     # 留着会让整行解析失败，退化成"读不出算式"。
-    s = re.sub(r"^[\]\)）】]+\s*", "", s)
+    s = re.sub(r"^[\]\)）】}]+\s*", "", s)
+    # 行首孤立的系数 1：`1y=2` 和 `y=2` 是同一个式子，学生不会写 `1y`。
+    # 这个 1 多半是上一行那个 `}` 的右半截被读成了数字——那一竖在框里，
+    # 模型答的是它看见的东西。只吃"1 后面紧跟字母"，`12x` 这种不动。
+    s = re.sub(r"^1(?=[a-zA-Z])", "", s)
     return _strip_derive_marks(s)
 
 
@@ -485,12 +544,17 @@ def _same_equation(a: str, b: str) -> bool:
     这比"再拉一个模型投票"硬——投票只能说明两台机器看法一致，同解能说明
     这一步在数学上成立。
     """
-    from .latex import parse
+    from .latex import parse, systems_equivalent
     from .verify import to_expr
 
     pa, pb = parse(a), parse(b)
     if not (pa.ok and pb.ok):
         return False
+    # 方程组单独比：把各条相加再比会抵消约束，两个不同的组会被判成同一行。
+    if pa.kind == "system" or pb.kind == "system":
+        return bool(
+            pa.kind == pb.kind == "system" and systems_equivalent(pa.obj, pb.obj)
+        )
     ea, eb = to_expr(pa), to_expr(pb)
     if ea is None or eb is None:
         return False
@@ -517,16 +581,26 @@ def _neighbor(lines: list[LineRead], i: int) -> str:
 
     往上看只跳过说明行以外的东西没意义：说明行（prose）不是式子，跳过它
     继续往上找是安全的，因为它不承载数学内容。
+
+    返回的是 `text`（清洗过的）而不是 `latex`：同解判断要先解析，
+    而原始 latex 里还挂着 `\\text{②}`、`\\quad(2)` 这类编号，一解析就失败，
+    这条裁决会静默失效——两个来源明明都读出了能对账的式子，却裁不动。
     """
     for j in range(i - 1, -1, -1):
         if lines[j].verdict == "prose":
             continue                      # 说明行不承载数学内容，跳过它不算跨窟窿
-        return lines[j].latex if lines[j].verdict == "ok" else ""
+        return lines[j].text if lines[j].verdict == "ok" else ""
     for j in range(i + 1, len(lines)):
         if lines[j].verdict == "prose":
             continue
-        return lines[j].latex if lines[j].verdict == "ok" else ""
+        return lines[j].text if lines[j].verdict == "ok" else ""
     return ""
+
+
+def _truncated(text: str) -> bool:
+    """这一行读到关系符就断了：`x=`。缺了右边，一定不是完整的读法。"""
+    s = (text or "").rstrip().rstrip("$")
+    return s.endswith(("=", "<", ">", "\\le", "\\ge", "\\ne"))
 
 
 def _tiebreak_by_math(lines: list[LineRead]) -> None:
@@ -547,17 +621,35 @@ def _tiebreak_by_math(lines: list[LineRead]) -> None:
     for i, lr in enumerate(lines):
         if lr.verdict != "review" or not lr.alternatives:
             continue
+        # 候选一律用 `text`（清洗过的），和 `_neighbor` 保持同一套标准。
+        # 一边用原始 latex、一边用清洗后的文本，同解判断必然对不上——
+        # 这种"半截 bug"最麻烦：代码在跑，日志也正常，就是不生效。
+        cands = [c for c in dict.fromkeys([lr.text, *lr.alternatives]) if c]
         anchor = _neighbor(lines, i)
-        if not anchor:
-            continue
-        cands = [lr.latex, *[c for c in lr.alternatives if c]]
-        fits = [c for c in cands if _same_equation(anchor, c)]
+        fits = [c for c in cands if anchor and _same_equation(anchor, c)]
+
         if not fits:
+            # 接不上邻行时还有一条路：这一行本来就缺了半截。
+            # 这一页 `x=1` 被一个来源读成 `x=`——关系符后面什么都没有，
+            # 不可能是完整读法；另一个来源读全了。没有理由留着残缺的那个。
+            if len(cands) < 2:
+                continue
+            whole = [c for c in cands if not _truncated(c)]
+            if len(whole) != 1:
+                continue
+            cut = [c for c in cands if _truncated(c)]
+            lr.text = lr.latex = whole[0]
+            lr.verdict = "ok"
+            lr.confidence = max(lr.confidence, 0.8)
+            lr.reasons = [
+                f"两个识别源一处读成 `{cut[0]}`、一处读成 `{whole[0]}`；"
+                f"`{cut[0]}` 停在关系符上没有右边，取读完整的那一个"
+            ]
             continue
+
         if len(fits) == 1:
             rejected = [c for c in cands if c != fits[0]]
-            lr.latex = fits[0]
-            lr.text = readable(fits[0])
+            lr.text = lr.latex = fits[0]
             lr.verdict = "ok"
             lr.confidence = max(lr.confidence, 0.8)
             lr.reasons = [
@@ -567,8 +659,7 @@ def _tiebreak_by_math(lines: list[LineRead]) -> None:
             ]
         else:
             best = min(fits, key=lambda c: (len(_canon(c)), cands.index(c)))
-            lr.latex = best
-            lr.text = readable(best)
+            lr.text = lr.latex = best
             lr.verdict = "ok"
             lr.confidence = max(lr.confidence, 0.8)
             lr.reasons = [
@@ -795,8 +886,8 @@ def _apply_uncertainty(work: WorkCheck, lines: list[LineRead]) -> list[str]:
         work.headline = f"{len(holes)} 行没认准，判不了对错"
         work.error_type = ""
         work.advice = (
-            "这不是你写错了，是这几行没认出来。可以把它们改清楚一点重拍，"
-            "或者直接在左边文本框里改成正确写法，再点一次「批改这份过程」。"
+            "这不是你写错了，是这几行没认出来。把下面「有行没认准」里那几行改成你写的式子，"
+            "点「按我改的重新判」——不用重新拍照，改哪行算哪行。"
         )
     elif weakened and work.grade == "pass":
         work.grade = "unread"
@@ -861,7 +952,8 @@ def _soften_digit_accusations(work: WorkCheck) -> list[str]:
         work.error_type = ""
         work.advice = (
             "这一处对不上，差的只是行首一个数字——很可能是把推导符看成了系数。"
-            "把那一行重新拍清楚，或者直接在左边改成正确写法，再点一次「批改这份过程」。"
+            "照原样重拍也行，或者直接在下面「有行没认准」里改成正确写法，"
+            "再点一次「按我改的重新判」。"
         )
     return notes
 
@@ -872,6 +964,164 @@ def _too_many_holes(work: WorkCheck, lines: list[LineRead]) -> bool:
         return False
     holes = sum(1 for lr in lines if not lr.sure)
     return holes / max(1, len(judgeable)) > MAX_UNREAD_SHARE
+
+
+def _problem_line(lines: list[LineRead], problem: str) -> int:
+    """题面是从哪一行来的（1 基行号，找不到就是 0）。
+
+    只做一件事：把"题面"这句话和行文本对上号。手改时靠它把题面跟着换——
+    否则用户把 `x²-5x+7=0` 改成 `x²-5x+6=0`，判定还在拿旧题算，
+    明明改对了反而得出「解不全，少了两个复根」，比不改更糟。
+    """
+    from .latex import parse
+
+    target = (problem or "").strip()
+    if not target:
+        return 0
+    pt = parse(target)
+    key = pt.sympy_str if pt.ok else readable(target)
+    for lr in lines:
+        body = (lr.text or "").strip()
+        if not body:
+            continue
+        if readable(body) == readable(target):
+            return lr.index
+        q = parse(body)
+        if (q.sympy_str if q.ok else readable(body)) == key:
+            return lr.index
+    return 0
+
+
+def _withdraw_on_bad_problem(
+    work: WorkCheck, kept: list[LineRead], pidx: int
+) -> list[str]:
+    """题面那一行没认准时，把整份结论撤掉。
+
+    批改里每一个"错"最后都落在"和题面对不上"：标准解是从题面算出来的，
+    反例也是相对题面算的。题面本身没认准，后面推得再严密，也只是一串
+    看起来很确定的猜测。
+
+    最该撤的是"伪推导"：它的意思是"答案对、过程错"，这个判断**完全**靠
+    标准解支撑。题面错了，"你过程是凑的"就是一顶扣错了的帽子——
+    比不判糟得多。
+    """
+    if not pidx:
+        return []
+    bl = next((lr for lr in kept if lr.index == pidx), None)
+    if bl is None or bl.sure:
+        return []
+
+    work.grade = "unread"
+    work.error_type = ""
+    work.expected = []
+    work.first_error = -1
+    # 标准解已经撤了，"见下方正确做法"这句话就指着一片空白，得一起删掉
+    work.notes = [n for n in work.notes if "标准解法见下方" not in n]
+    work.headline = f"第 {pidx} 行是题面，这一行没认准，整份判不了"
+    for s in work.steps:
+        if s.verdict in ("wrong", "partial"):
+            s.verdict = "suspect"
+            s.counter = ""
+            s.reason = "题面没认准，这一步是相对一道不确定的题判的，不作数"
+            s.row = ["? 待核对", s.reason]
+    work.advice = (
+        "标准解、以及每一处「和题对不上」的判断，都是从题面算出来的。"
+        "题面这一行没认准，这些结论就都悬空了。"
+        "把题面改成正确的式子（或者填到上面的输入框里），再点一次「按我改的重新判」，"
+        "不用重拍。"
+    )
+    return [
+        f"第 {pidx} 行是题面，这一行没认准：基于题面的结论（标准解、伪推导、"
+        "漏解）全部撤回，逐行结果仅供参考。"
+    ]
+
+
+def _judge(
+    kept: list[LineRead],
+    *,
+    problem: str,
+    page: str,
+    problem_image: str | None = None,
+    split_note: str = "",
+    timings: dict[str, float] | None = None,
+) -> PhotoCheck:
+    """拿已经读好的行去批改。
+
+    识别和判定拆开，是因为它们成败完全不同：识别要钱要时间、还可能重来一次
+    就换个结果；判定是纯本地计算，改一行字重算一次没有任何代价。
+    界面上的"手动改成我写的式子再判一次"就是复用这里——不重新拍照、不重新识别。
+    """
+    timings = {} if timings is None else timings
+    t0 = time.time()
+    texts = [lr.text if lr.text else PLACEHOLDER for lr in kept]
+    work = grade(texts, problem=problem or "", problem_image=problem_image or "")
+    timings["grade"] = time.time() - t0
+    # 题面对应哪一行。显式给的题面也可能就是某一行的文字（手改后就是这样），
+    # 所以这里不区分"系统认的"还是"用户填的"，能对上就记下来。
+    pidx = _problem_line(kept, work.problem)
+
+    notes = _apply_uncertainty(work, kept)
+    # 判错的门槛：先看这条"错"是不是建立在一个可能是推导符的数字上
+    notes += _soften_digit_accusations(work)
+    if _too_many_holes(work, kept):
+        work.grade = "unread"
+        work.error_type = ""
+        work.headline = (
+            f"这一页 {len(kept)} 行里有 {sum(1 for lr in kept if not lr.sure)} 行没认准，"
+            "整份判不了"
+        )
+        work.advice = (
+            "相邻两式比较要求上下行是连着的。中间空一格，后面的判断全部作废，"
+            "所以整份不给结论——这比给一个可能是错的结论有用。"
+            "没认准的那几行，可以在下面「有行没认准」里改成你写的式子，"
+            "再点「按我改的重新判」，不用重拍。"
+        )
+        notes.append("没认准的行太多了，整份不给总判定；逐行结果仍列在表里，仅供参考。")
+
+    # 题面没认准：上面每一步都是按"和题面比"算的，题面悬空就得全撤。
+    # 放在最后是因为它的结论最具体，该由它来写总判定那句话。
+    notes += _withdraw_on_bad_problem(work, kept, pidx)
+
+    manual = sorted(
+        lr.index for lr in kept
+        if MANUAL_SOURCE in lr.sources or CONFIRM_SOURCE in lr.sources
+    )
+    if manual:
+        # 这句话必须留在结论里。人工改过的行系统没看见原件，它按用户给的式子
+        # 算得再准，也只能保证"你给的这个过程内部自洽"。
+        changed = sorted(lr.index for lr in kept if MANUAL_SOURCE in lr.sources)
+        checked = sorted(lr.index for lr in kept if CONFIRM_SOURCE in lr.sources)
+        bits = []
+        if changed:
+            bits.append(f"第 {'、'.join(map(str, changed))} 行是你手动输入的")
+        if checked:
+            bits.append(f"第 {'、'.join(map(str, checked))} 行你核对过、没改动")
+        if pidx and pidx in (set(changed) | set(checked)):
+            # 这一行不只是"某一步"，它是判定的基准。不说清楚，用户会以为
+            # 改的是无关的一行，看到后面成片判错也不知道为什么。
+            bits.append(f"第 {pidx} 行同时被当作题面，后面每一行的对错都是相对这道题算的")
+        notes.append("；".join(bits) + "。系统没核对原件，这几行按你给的式子算，"
+                     "其余各行仍按相邻两式是否等价来判。")
+
+    if split_note:
+        notes.append(f"切行：{split_note}")
+
+    # 说明并进 WorkCheck，界面上「错在哪」那一段会把它们一起显示出来；
+    # 单独留在 PhotoCheck 里的话，用户看不到"为什么判不了"。
+    for n in notes:
+        if n not in work.notes:
+            work.notes.append(n)
+
+    return PhotoCheck(
+        work=work,
+        lines=kept,
+        text="\n".join(texts),
+        page=page,
+        split_note=split_note,
+        notes=notes,
+        timings=timings,
+        problem_line=pidx,
+    )
 
 
 def check(
@@ -892,43 +1142,193 @@ def check(
     )
     # 空白小块不进过程文本，也不进步骤表——它本来就不是"一行"
     kept = [lr for lr in lines if lr.verdict != "blank"]
-
-    t0 = time.time()
-    texts = [lr.text if lr.text else PLACEHOLDER for lr in kept]
-    work = grade(texts, problem=problem or "", problem_image=image)
-    timings["grade"] = time.time() - t0
-
-    notes = _apply_uncertainty(work, kept)
-    # 判错的门槛：先看这条"错"是不是建立在一个可能是推导符的数字上
-    notes += _soften_digit_accusations(work)
-    if _too_many_holes(work, kept):
-        work.grade = "unread"
-        work.error_type = ""
-        work.headline = (
-            f"这一页 {len(kept)} 行里有 {sum(1 for lr in kept if not lr.sure)} 行没认准，"
-            "整份判不了"
-        )
-        work.advice = (
-            "相邻两式比较要求上下行是连着的。中间空一格，后面的判断全部作废，"
-            "所以整份不给结论——这比给一个可能是错的结论有用。"
-        )
-        notes.append("没认准的行太多了，整份不给总判定；逐行结果仍列在表里，仅供参考。")
-
-    if page.note:
-        notes.append(f"切行：{page.note}")
-
-    # 说明并进 WorkCheck，界面上「错在哪」那一段会把它们一起显示出来；
-    # 单独留在 PhotoCheck 里的话，用户看不到"为什么判不了"。
-    for n in notes:
-        if n not in work.notes:
-            work.notes.append(n)
-
-    return PhotoCheck(
-        work=work,
-        lines=kept,
-        text="\n".join(texts),
+    return _judge(
+        kept,
+        problem=problem,
         page=image,
+        problem_image=image,
         split_note=page.note,
-        notes=notes,
         timings=timings,
     )
+
+
+# ---------------------------------------------------------------- 人工修正
+
+
+def edit_text(pc: PhotoCheck) -> str:
+    """把识别结果摊成"一行一行、带原行号"的文本，给用户改。
+
+    行号的作用是**对齐**：用户改完只剩 6 行，系统还得知道哪一行对应原来的第 6 行，
+    否则原来那行的"没认准"标记就丢了，或者张冠李戴到别的行上。
+    """
+    return "\n".join(
+        f"{lr.index}. {lr.text or PLACEHOLDER}" for lr in pc.lines
+    )
+
+
+def _split_edits(text: str) -> list[tuple[int | None, str]]:
+    """把用户改过的文本拆成 [(原行号或 None, 内容)]。
+
+    两种输入都要吃得下：带行号的（界面预填的样子）和不带行号的（用户全删了自己重打）。
+    """
+    rows = [ln.strip() for ln in (text or "").replace("\r\n", "\n").split("\n")]
+    rows = [r for r in rows if r]
+    out: list[tuple[int | None, str]] = []
+    for r in rows:
+        m = _EDIT_NUM.match(r)
+        if m:
+            out.append((int(m.group(1)), m.group(2).strip()))
+        else:
+            out.append((None, r))
+    if all(i is None for i, _ in out):
+        # 用户把行号删干净了。按位置对应——这比"全都当成新行"更接近他的本意，
+        # 因为预填的文本本来就是按原行顺序排的。
+        return [(k + 1, body) for k, (_, body) in enumerate(out)]
+    return out
+
+
+def _faithful(body: str, orig: str) -> bool:
+    """用户这一行到底改没改。
+
+    比的是"清洗后能否再解析成同一个式子"，不是逐字相同：去掉一个空格、
+    把 `2 x` 写成 `2x`，系统本来就不区分，不该因此把这行标成"手输"。
+    """
+    from .latex import parse
+
+    if body.strip() == (orig or "").strip():
+        return True
+    a, b = readable(body), readable(orig or "")
+    if a == b:
+        return True
+    pa, pb = parse(a), parse(b)
+    return pa.ok and pb.ok and pa.sympy_str == pb.sympy_str
+
+
+def regrade(
+    pc: PhotoCheck,
+    text: str,
+    *,
+    confirm: Iterable[int] = (),
+    problem: str = "",
+    page: str = "",
+) -> PhotoCheck:
+    """按用户改过（或核对过）的过程重新判一遍，不重新识别。
+
+    三种行，三种待遇。区别只在一件事上：**这个式子是系统看清的，还是人给的**。
+      · 改过的行（`手输`）→ 标 `ok`、置信度 1.0，结论里点名，系统不为它背书；
+      · 没改、但用户在勾选框里核对过的行（`核对`）→ 同样当确定，
+        因为这行原文本来就对，只是两个来源没谈拢；
+      · 没改也没核对的行 → 保留原来的把握，原来"没认准"的仍是窟窿。
+    这一条不能松成"提交了就全算数"：`y=2` 被读成 `7y=2` 时，原样保留就等于
+    把一个字都没改的错读当真值，接下来判出来的"不成立"全是冤案。
+
+    其余：行被删掉就当不存在；新加的行（没有行号）按顺序接在后面。
+    """
+    edits = _split_edits(text)
+    sure_ids = {int(i) for i in (confirm or ())}
+    by_idx = {lr.index: lr for lr in pc.lines}
+    taken: set[int] = set()
+    new_lines: list[LineRead] = []
+    confirmed: list[int] = []
+    given: dict[int, str] = {}      # 原行号 → 用户这次给的内容（非空才记）
+
+    for idx, body in edits:
+        orig = by_idx.get(idx) if idx is not None else None
+        if orig is not None:
+            taken.add(idx)
+        if body and body != PLACEHOLDER and idx is not None:
+            given[idx] = body
+        if not body or body == PLACEHOLDER:
+            # 留着问号 = 承认这行没读出来，不当成用户给了内容
+            new_lines.append(
+                LineRead(
+                    index=len(new_lines) + 1,
+                    crop=orig.crop if orig else "",
+                    verdict="failed",
+                    reasons=["这一行留了问号，没有内容可判"],
+                )
+            )
+            continue
+        if orig is not None and _faithful(body, orig.text):
+            # 一个字没改。用户勾了核对，才算他确认过；否则保持系统原来的把握。
+            if idx in sure_ids:
+                confirmed.append(idx)
+                new_lines.append(
+                    LineRead(
+                        index=len(new_lines) + 1,
+                        crop=orig.crop,
+                        latex=body,
+                        text=body,
+                        verdict="ok",
+                        confidence=1.0,
+                        sources=[CONFIRM_SOURCE],
+                        reasons=["这一行你核对过，按这个读法判"],
+                    )
+                )
+                continue
+            new_lines.append(
+                LineRead(
+                    index=len(new_lines) + 1,
+                    crop=orig.crop,
+                    latex=orig.latex,
+                    text=orig.text,
+                    verdict=orig.verdict,
+                    confidence=orig.confidence,
+                    sources=orig.sources,
+                    reasons=orig.reasons,
+                    alternatives=orig.alternatives,
+                )
+            )
+            continue
+        new_lines.append(
+            LineRead(
+                index=len(new_lines) + 1,
+                crop=orig.crop if orig else "",
+                latex=body,
+                text=body,
+                verdict="ok",
+                confidence=1.0,
+                sources=[MANUAL_SOURCE],
+                reasons=["这一行按你输入的式子判"],
+            )
+        )
+
+    # 用户删掉的行：不是他的内容，不进判定。但如果是空白块（本来就不是一行），
+    # 删了也无所谓，不必提醒。
+    # 题面跟着改。题面本来是系统自己从某一行认出来的，用户改的就是那一行时，
+    # 判定必须按改过的题算——沿用 `pc.work.problem` 会拿旧题判新过程，
+    # 改对了反而判出「少了两个复根」这种结论。
+    prob = (problem or "").strip()
+    base_note = ""
+    if not prob:
+        if pc.problem_line:
+            body = given.get(pc.problem_line)
+            if body:
+                prob = body
+            else:
+                prob = pc.work.problem
+                base_note = (
+                    f"第 {pc.problem_line} 行原来是题面，这次你把它删了（或留了问号），"
+                    "仍按原题面判。如果那道题也认错了，把题面填到上面的输入框里再判一次。"
+                )
+        else:
+            # 题面不是从某一行来的（用户自己填的），照旧用。
+            prob = pc.work.problem
+
+    dropped = [i for i in by_idx if i not in taken]
+    out = _judge(
+        new_lines,
+        problem=prob,
+        page=page or pc.page,
+        split_note=pc.split_note,
+    )
+    if base_note:
+        out.notes.append(base_note)
+        out.work.notes.append(base_note)
+    if dropped:
+        out.notes.append(
+            f"第 {'、'.join(map(str, sorted(dropped)))} 行没出现在你给的过程里，"
+            "已按删除处理——如果那是漏写的，补回去再判一次。"
+        )
+        out.work.notes.append(out.notes[-1])
+    return out

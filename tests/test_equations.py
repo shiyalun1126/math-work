@@ -104,6 +104,26 @@ def test_rational_drops_extraneous_root():
     assert any("增根" in d for d in ans.dropped)
 
 
+def test_identity_fraction_excludes_the_pole():
+    """(x²-1)/(x-1)=x+1 是恒等式，但 x=1 处两边都没定义。
+
+    约分把分母约掉了，定义域没跟着消失。这一支以前直接回"任意实数"，
+    等于把一个代不回去的点算进答案——分式题的答案错得最典型的一种。
+    """
+    ans = E.answer("(x^2-1)/(x-1)=x+1", explain=False)
+    assert ans.ok
+    assert "任意实数" in ans.answer_latex
+    assert "1" in ans.answer_latex and "≠" in ans.answer_latex, ans.answer_latex
+    assert any("定义域" in (s.get("title") or "") for s in ans.steps)
+
+
+def test_plain_identity_still_says_any_real():
+    """没有分母的恒等式不许被上一条误伤。"""
+    ans = E.answer("2(x-3)=2x-6", explain=False)
+    assert ans.ok
+    assert ans.answer_latex == "x 取任意实数", ans.answer_latex
+
+
 def test_empty_solution_set_is_an_answer_not_a_failure():
     ans = E.answer("1/(x-2)=0", explain=False)
     assert ans.ok

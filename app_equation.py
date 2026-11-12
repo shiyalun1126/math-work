@@ -19,7 +19,7 @@ import os
 
 import gradio as gr
 
-from mathagent import equations, photocheck, workcheck
+from mathagent import equations, guard, photocheck, workcheck
 from mathagent.types import WorkCheck
 
 LATEX_DELIMS = [
@@ -84,7 +84,8 @@ def _cover_badge(ans) -> str:
     bg, border, fg, label = _COVER.get(t.coverage, _COVER["out"])
     detail = t.label
     if t.vars:
-        detail += f" · 未知数 {'、'.join(t.vars)}"
+        vt = equations.vars_text(t)
+        detail += f" · {vt}" if vt else ""
     extra = ans.note or t.note or ans.error or ""
     prov = "" if ans.provided else (
         '<div style="margin-top:8px;padding:7px 10px;border-radius:8px;'
@@ -126,9 +127,22 @@ def _answer_md(ans) -> str:
     return "\n".join(out)
 
 
-def _steps_md(ans) -> str:
-    if not ans.steps:
+def _derive_md(ans) -> str:
+    """配方法推导，只在二次项系数带字母时出现。"""
+    dv = getattr(ans, "derivation", None) or []
+    if not dv:
         return ""
+    out = ["### 求根公式怎么推出来的", "",
+           "> 配方法。中间几步和上一步同解，开方的两支都代回原方程验过。", ""]
+    for i, st in enumerate(dv, 1):
+        out.append(f"**{i}. {st['title']}**\n\n$${st['latex']}$$")
+    return "\n\n".join(out)
+
+
+def _steps_md(ans) -> str:
+    head = _derive_md(ans)
+    if not ans.steps:
+        return head
     out = ["### 怎么做", ""]
     for i, st in enumerate(ans.steps, 1):
         out.append(f"**{i}. {st['title']}**\n\n$${st['latex']}$$")
@@ -136,7 +150,7 @@ def _steps_md(ans) -> str:
     if ans.explain:
         body += ("\n\n### 讲评\n\n" + ans.explain
                  + "\n\n> 讲评只讲思路；答案和每一步的数都是程序真算出来的，不是模型猜的。")
-    return body
+    return f"{head}\n\n{body}" if head else body
 
 
 def _meta_md(meta: dict | None, ans) -> str:
@@ -425,6 +439,8 @@ with gr.Blocks(title="方程 · 一个题型做透") as demo:
 
 
 if __name__ == "__main__":
+    # 先把超时守卫的子进程拉起来，省掉第一页的 1 秒等待（后台线程，不挡启动）。
+    guard.warmup()
     demo.queue().launch(
         theme=gr.themes.Default(primary_hue="teal", neutral_hue="gray"),
         css=CSS,

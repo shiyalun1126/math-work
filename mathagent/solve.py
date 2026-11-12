@@ -6,12 +6,10 @@
 
 from __future__ import annotations
 
-import threading
-
 import sympy
 from sympy import Derivative, Integral, Poly, solve as sp_solve
 
-from . import config
+from . import config, guard
 from .latex import to_latex
 from .types import ParsedExpr, SolveResult, Step
 
@@ -127,6 +125,40 @@ def check_steps(sr: SolveResult) -> SolveResult:
     return sr
 
 
+def _original_denominators(lhs, rhs) -> list:
+    """原式里真实出现的分母（不为 1 的那些）。
+
+    约分之前必须先记下来。`(x²-1)/(x-1)` 约完是 `x+1`，那个 `x-1` 就没了，
+    可定义域还在：x=1 依然代不回去。恒等式那一支尤其危险——它根本不走
+    "解出来再验根"那段，分母一旦丢了，x=1 就直接混进"任意实数"里。
+    """
+    out = []
+    for e in (lhs, rhs):
+        try:
+            _, den = sympy.fraction(sympy.together(e))
+        except Exception:  # noqa: BLE001
+            continue
+        if den != 1 and getattr(den, "free_symbols", None):
+            out.append(den)
+    return out
+
+
+def _den_zeros(dens: list, x) -> list:
+    """这些分母在哪些 x 上为 0。只收解出来不含别的主元的那些。"""
+    bad = []
+    for den in dens:
+        try:
+            roots = sympy.solve(den, x)
+        except Exception:  # noqa: BLE001
+            continue
+        if not isinstance(roots, (list, tuple)):
+            continue
+        for r in roots:
+            if isinstance(r, sympy.Expr) and not r.free_symbols:
+                bad.append(r)
+    return bad
+
+
 def _solve_equation(lhs, rhs, sr: SolveResult) -> None:
     raw = lhs - rhs
     try:
@@ -135,14 +167,41 @@ def _solve_equation(lhs, rhs, sr: SolveResult) -> None:
         num, den = raw, sympy.Integer(1)
     expr = sympy.expand(num)
     syms = _symbols_of([lhs, rhs])
+    dens = _original_denominators(lhs, rhs)
     sr.steps.append(_eq_step("原式", lhs, rhs, check="equiv"))
+
+    x = syms[0]
+    # 两个以上符号时，未知数不能取「字母序最小的那个」——x²-2mx+m²-1=0 会被
+    # 解成 m = x ± 1，答的是另一个字母。按 x 优先、其次次数最高来定主元。
+    if syms:
+        try:
+            from .params import _pick_main
+
+            got = _pick_main(sympy.expand(lhs - rhs))
+            if got:
+                x = got[0]
+        except Exception:  # noqa: BLE001
+            pass
 
     # 化简后恒等于 0：这是恒等式，解集是全体实数，不是"无解"。
     # 两者在批改里差得很远——学生写 2(x-3)=2x-6 是同解变形，
     # 判成"无解方程"就是冤枉；反过来把无解说成恒成立，是放过一个错。
+    #
+    # 但"全体实数"要按原式算，不是按约分后的式子算：
+    # (x²-1)/(x-1)=x+1 在 x=1 处两边都没定义，答案得把 1 抠掉。
     if syms and sympy.simplify(expr) == 0:
-        sr.steps.append(_plain("结论", r"\text{两边恒等，}x\text{ 取任意实数}"))
-        sr.solutions = ["x 取任意实数"]
+        bad = _den_zeros(dens, x)
+        if bad:
+            holes = "、".join(f"{to_latex(v)}" for v in bad)
+            sr.steps.append(_plain(
+                "定义域",
+                rf"\text{{原式的分母不能为 0，}}{holes}\text{{ 使分母为 0，需排除}}",
+            ))
+            sr.solutions = [f"{to_latex(x)} 为任意实数且 {to_latex(x)} ≠ {to_latex(bad[0])}"]
+            sr.steps.append(_plain("结论", rf"{to_latex(x)} \neq {holes}\text{{ 的任意实数}}"))
+        else:
+            sr.steps.append(_plain("结论", rf"\text{{两边恒等，}}{to_latex(x)}\text{{ 取任意实数}}"))
+            sr.solutions = [f"{to_latex(x)} 取任意实数"]
         sr.ok = True
         return
 
@@ -158,17 +217,7 @@ def _solve_equation(lhs, rhs, sr: SolveResult) -> None:
         sr.error = "式子里没有任何未知数，疑似识别时丢了上标或变量，请核对原图"
         return
 
-    x = syms[0]
-    # 两个以上符号时，未知数不能取「字母序最小的那个」——x²-2mx+m²-1=0 会被
-    # 解成 m = x ± 1，答的是另一个字母。按 x 优先、其次次数最高来定主元。
-    try:
-        from .params import _pick_main
-
-        got = _pick_main(sympy.expand(lhs - rhs))
-        if got:
-            x = got[0]
-    except Exception:  # noqa: BLE001
-        pass
+    # 主元已经在上面定过了（恒等式那一支也要用它写结论），这里不再重算。
     if len(syms) > 1:
         sols = sp_solve(expr, x, dict=True)
         sr.steps.append(_eq_step("整理", expr, 0, check="equiv"))
@@ -329,21 +378,12 @@ def solve(pe: ParsedExpr) -> SolveResult:
         return _scope_exit(pe, hard)
 
     # 兜底超时：预判挡不住的情况（没见过的花样）还得有个止损点。
-    # 用 daemon 线程而不是进程池——超时后线程算完自然结束，不会占着进程不退。
+    # 跑在子进程里（见 guard 模块），到点直接杀掉——线程只能停止等待，
+    # 那段没算完的 sympy 会继续占着 GIL，界面照样卡。
     timeout = config.solve_timeout()
-    box: dict[str, object] = {}
+    status, got = guard.try_run("solve_core", pe, timeout=timeout)
 
-    def work() -> None:
-        try:
-            box["r"] = _solve_core(pe)
-        except BaseException as exc:  # noqa: BLE001
-            box["e"] = exc
-
-    th = threading.Thread(target=work, daemon=True, name="solve-core")
-    th.start()
-    th.join(timeout)
-
-    if th.is_alive():
+    if status == guard.TIMEOUT:
         return _scope_exit(
             pe,
             f"这题算了 {timeout:g} 秒还没出结果，我先停下来了。"
@@ -351,17 +391,14 @@ def solve(pe: ParsedExpr) -> SolveResult:
             "或者某个符号被认错了。可以先核对一下式子。",
         )
 
-    err = box.get("e")
-    if isinstance(err, BaseException):
-        sr = SolveResult(kind=pe.kind, problem_latex=pe.normalized)
-        sr.error = f"{type(err).__name__}: {err}"
-        return sr
-
-    got = box.get("r")
-    if isinstance(got, SolveResult):
+    if status == guard.OK and isinstance(got, SolveResult):
         return got
+
     sr = SolveResult(kind=pe.kind, problem_latex=pe.normalized)
-    sr.error = "求解没有返回结果"
+    if status == guard.ERR:
+        sr.error = str(got)
+    else:
+        sr.error = "求解没有返回结果"
     return sr
 
 

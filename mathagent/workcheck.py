@@ -16,13 +16,13 @@
 from __future__ import annotations
 
 import re
-import threading
 import time
 from dataclasses import dataclass, field
 
 import sympy
 from sympy import Symbol, simplify, together
 
+from . import guard
 from .latex import parse, to_latex
 from .route import cjk_count
 from .solve import solve as solve_parsed
@@ -76,22 +76,13 @@ _REF = re.compile(r"(?:由|代入|将|把)\s*[①②③④⑤⑥⑦⑧⑨⑩]")
 _REF_NUM = re.compile(r"(?:由|代入|将|把)\s*[（(]\s*(\d+)\s*[)）]")
 
 
-def _guard(fn, default=None, timeout: float = _GUARD):
-    """带超时的符号运算。simplify 遇到病态表达式会卡很久，不能让它拖住整页。"""
-    box: dict = {}
-    done = threading.Event()
+def _guard(op: str, *args, default=None, timeout: float = _GUARD):
+    """带超时的符号运算。simplify 遇到病态表达式会卡很久，不能让它拖住整页。
 
-    def work() -> None:
-        try:
-            box["v"] = fn()
-        except Exception:  # noqa: BLE001
-            box["v"] = default
-        finally:
-            done.set()
-
-    threading.Thread(target=work, daemon=True).start()
-    done.wait(timeout)
-    return box.get("v", default)
+    真正跑在子进程里（见 `guard` 模块），到点是**杀掉**，不是只停止等待——
+    否则一页里连着几次超时，进程里就躺着几条还在算的线程，越用越慢。
+    """
+    return guard.run(op, *args, timeout=timeout, default=default)
 
 
 # ------------------------------------------------------------------ 切行与读行
@@ -367,7 +358,7 @@ def _solutions(pe: ParsedExpr, var: Symbol | None = None):
     var = _main_var([d], hint=var)
     if var is None:
         return None, None
-    got = _guard(lambda: sympy.solve(sympy.together(d), var))
+    got = _guard("solve", sympy.together(d), var)
     if got is None:
         return var, None
     return var, got
@@ -380,7 +371,7 @@ def _residual(pe: ParsedExpr, var: Symbol, val):
     pairs = pe.obj if pe.kind in ("equation", "system") else []
     out = []
     for lhs, rhs in pairs:
-        r = _guard(lambda: simplify((lhs - rhs).subs(var, val)))
+        r = _guard("simplify", (lhs - rhs).subs(var, val))
         out.append(r)
     return out
 
@@ -388,7 +379,7 @@ def _residual(pe: ParsedExpr, var: Symbol, val):
 def _eq(a, b) -> bool:
     if a is None or b is None:
         return False
-    v = _guard(lambda: simplify(a - b))
+    v = _guard("simplify", a - b)
     if v is None:
         return False
     try:
@@ -436,8 +427,8 @@ def _side_val(pair, var, val):
     if pair is None:
         return None, None
     lhs, rhs = pair
-    a = _guard(lambda: simplify(lhs.subs(var, val)))
-    b = _guard(lambda: simplify(rhs.subs(var, val)))
+    a = _guard("simplify", lhs.subs(var, val))
+    b = _guard("simplify", rhs.subs(var, val))
     return a, b
 
 
@@ -484,12 +475,12 @@ def _guess_action(prev: ParsedExpr, cur: ParsedExpr, var: Symbol) -> str:
     d1, d2 = _diffof(prev), _diffof(cur)
     if d1 is None or d2 is None:
         return ""
-    diff = _guard(lambda: simplify(d2 - d1))
+    diff = _guard("simplify", d2 - d1)
     if diff is not None and diff == 0:
         return "整理（写法变了，两边相减仍相等）"
     # 先看倍数：两边同乘/同除是最常见的一种合法变形，
     # 而且它的差分往往不是常数，放到后面就会被误说成"移项"。
-    ratio = _guard(lambda: simplify(d2 / d1))
+    ratio = _guard("simplify", d2 / d1)
     if ratio is not None and not (getattr(ratio, "free_symbols", set()) - {var}):
         if ratio != 0 and ratio != 1:
             return _scale_word(ratio)
@@ -597,10 +588,10 @@ def _wrong_type(prev: ParsedExpr, cur: ParsedExpr, var) -> str:
     d1, d2 = _diffof(prev), _diffof(cur)
     if d1 is None or d2 is None:
         return ""
-    diff = _guard(lambda: simplify(d2 - d1))
+    diff = _guard("simplify", d2 - d1)
     if diff is not None and getattr(diff, "is_number", False) and diff != 0:
         return f"两边差了一个常数 {_num(sympy.Abs(diff))}，典型的移项变号/漏乘错误"
-    ratio = _guard(lambda: simplify(d2 / d1))
+    ratio = _guard("simplify", d2 / d1)
     if (
         ratio is not None
         and not getattr(ratio, "free_symbols", set())
@@ -646,7 +637,7 @@ def _relate(prev: ParsedExpr, cur: ParsedExpr, var: Symbol | None) -> tuple[str,
     if d1 is None or d2 is None:
         return "unknown", "这一段读不出算式，跳过", []
 
-    same = _guard(lambda: simplify(d2 - d1))
+    same = _guard("simplify", d2 - d1)
     if same is not None and same == 0:
         act = _guess_action(prev, cur, var) if var is not None else ""
         return "equiv", act or "等价改写（两边相减仍相等）", []
@@ -744,6 +735,21 @@ def _row_of(x) -> list:
     if isinstance(x, (tuple, list)):
         return list(x)
     return [x]
+
+
+def _answer_pairs(pe) -> list:
+    """这一行像不像"把答案写出来"：`x=2, y=1` 这种每条都直接指名一个未知数。
+
+    只从这种行里取答案。`x+y=3, x-y=1` 联立也能收敛成一个点，但那是题，
+    不是答案——拿它当答案，等于"照抄一遍题目就算写了答案"。
+    """
+    if not pe or not pe.ok or pe.kind != "system":
+        return []
+    out = []
+    for lhs, rhs in pe.obj:
+        if getattr(lhs, "is_Symbol", False) and not getattr(rhs, "free_symbols", None):
+            out.append((lhs, rhs))
+    return out if len(out) == len(pe.obj) else []
 
 
 def _is_point(sol, vars_) -> bool:
@@ -845,7 +851,10 @@ def _grade_linear_system(items, res: WorkCheck, ppe, t0: float) -> WorkCheck:
 
     base_sol = _linsolve(facts, vars_)
     res.problem = res.problem or ppe.normalized
-    res.expected = [_sol_show(base_sol, vars_)] if base_sol is not None else []
+    # 只有当解是**唯一一组数**时才叫"标准答案"。题面没填、只拿第一行当题面时，
+    # `2x+y=4` 单方程解出来是 `x = 2 - y/2`、`y = y`——那是通解，把它印在
+    # 「标准答案」后面，看上去像系统连方程组有几元几式都没看清。
+    res.expected = [_sol_show(base_sol, vars_)] if _is_point(base_sol, vars_) else []
 
     # 题面自己就矛盾时，往下每一步都会"联立后无解"，一路判错——可学生没错，
     # 是题抄错了或题目本身无解。这种情况不给对错结论。
@@ -908,6 +917,10 @@ def _grade_linear_system(items, res: WorkCheck, ppe, t0: float) -> WorkCheck:
         # 靠的正是把这两件事分开记。
         if it.kind == "assign":
             got.extend(it.assigns)
+        elif it.kind == "system" and not got:
+            # `x=2, y=1` 这种一行写全的答案，解析出来是 system 不是 assign，
+            # 不认它就等于"没写答案"——学生写对了也挨一句。
+            got.extend(_answer_pairs(it.pe))
 
         if new == sympy.EmptySet:
             it.verdict = "wrong"
@@ -973,14 +986,16 @@ def _grade_linear_system(items, res: WorkCheck, ppe, t0: float) -> WorkCheck:
 
     # 答案核验：学生写的值能不能满足**原题条件**（不是被 assign 扩充过的 facts，
     # 否则自己写的答案代回去当然成立）
-    res.got = [f"{s.name}={_num(v)}" for s, v in got]
+    # 同一行里重复写两遍（`x=1` 抄了两行）不该在结论里念两遍：
+    # "你写的 y=2、x=1、x=1" 看着像系统把一行数成了两行。
+    res.got = list(dict.fromkeys(f"{s.name}={_num(v)}" for s, v in got))
     have = {s.name for s, _ in got}
     answer_ok = False
     if len(have) >= len(vars_):
         sub = {s: v for s, v in got}
         ok_all = True
         for lhs, rhs in orig:
-            r = _guard(lambda: simplify((lhs - rhs).subs(sub)))
+            r = _guard("simplify", (lhs - rhs).subs(sub))
             if r is None or r != 0:
                 ok_all = False
                 break
@@ -1125,7 +1140,8 @@ def grade(
                     break
         if hit is None:
             hit = next(
-                (it for it in cands if _guard(lambda: equivalent(it.pe, ppe), False)), None
+                (it for it in cands
+                 if _guard("equivalent", it.pe, ppe, default=False)), None
             )
         if hit is not None:
             hit.role = "problem"
@@ -1268,12 +1284,23 @@ def grade(
             None,
         )
         if last is not None and last.pe is not None:
-            _, vals = _solutions(last.pe, var)
-            if vals and var is not None:
-                got = [(var, v) for v in vals]
+            # 方程组不能靠"把各式相加再解一个未知数"：`x+y=3, x-y=1` 相加是
+            # `2x-4`，只能解出 x=2，y 拿不到。学生明明写了 `x=2, y=1`，
+            # 也会被判"没读到最终答案"——那是把对的判成没写。
+            ans_pairs = _answer_pairs(last.pe)
+            if ans_pairs:
+                got = list(ans_pairs)
                 inferred_answer = True
-                res.notes.append("过程里没有写成 x=… 的答案，按最后一个等式的解集判定")
-    res.got = [f"{s.name}={_num(v)}" for s, v in got]
+                res.notes.append("过程里没有写成 x=… 的答案，按最后一行的赋值判定")
+            else:
+                _, vals = _solutions(last.pe, var)
+                if vals and var is not None:
+                    got = [(var, v) for v in vals]
+                    inferred_answer = True
+                    res.notes.append("过程里没有写成 x=… 的答案，按最后一个等式的解集判定")
+    # 同一行里重复写两遍（`x=1` 抄了两行）不该在结论里念两遍：
+    # "你写的 y=2、x=1、x=1" 看着像系统把一行数成了两行。
+    res.got = list(dict.fromkeys(f"{s.name}={_num(v)}" for s, v in got))
 
     # 总判定
     res.first_error = first_err
