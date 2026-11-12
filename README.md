@@ -76,7 +76,21 @@ CI 在每次 push 时自动跑一遍（`.github/workflows/ci.yml`）。
 
 ## 数据与隐私
 
-仓库**不含**学生作业原图（`data/inbox*`、`data/work/`、`data/crops/` 均已忽略），也不含下载的第三方数据集（`data/public/`，多为非商业许可）。`fixtures/` 里保留的是自造样张，用于测试与演示。
+作业**原图**不进仓库：`data/inbox*`、`data/work/`、`data/crops/`、`data/raw/`、`data/test/`
+均已忽略；下载的第三方数据集（`data/public/`，多为非商业许可）也不进。`fixtures/`
+里保留的是程序生成的样张（`tools/make_*.py` 可复现）。
+
+**但原图被忽略不等于整仓脱敏。** 拍照链路会把同一张作业的另一种形态留在别处：
+`reports/p0_*.jpg` 是八页实拍的拼贴与切行检查图，`data/photo_results_v*.jsonl`
+含逐行识别文本和判定结果；错题本 `data/cases.jsonl` 每条含题目原文和学生答案。
+这些能还原出"谁写了什么、错在哪"，所以单独登记、单独核发布权。
+
+- 清单：`data/assets.csv`（每张图/每份快照的来源与授权状态）
+- 检查：`python tools/check_assets.py`（`--strict` 把未核实的项当失败）
+- 说明：[`docs/资产来源与授权.md`](docs/资产来源与授权.md)
+
+目前 5 张实拍衍生图与 1 组识别文本快照（`data/photo_results_v*.jsonl`）标为 `pending`——
+目检无姓名/学号/学校，但发布权待记录人确认。
 
 ## 许可
 

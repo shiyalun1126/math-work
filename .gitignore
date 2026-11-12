@@ -39,6 +39,13 @@ data/public/
 # 真实照片评测的当次采集快照（重跑会覆盖）
 data/photo_results.jsonl
 
+# 错题本：运行时追加，每条含题目原文、学生答案、判错依据（属个人信息）
+# 只忽略原图目录是不够的——文本一样能还原出"谁写了什么、错在哪"。
+data/cases.jsonl
+data/cases*.jsonl
+data/cases.json
+data/cases.json
+
 # 系统
 .DS_Store
 Thumbs.db

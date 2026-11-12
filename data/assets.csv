@@ -1,0 +1,40 @@
+﻿path,kind,generator,contains_personal,status,note
+docs/mvp_env.png,screenshot,手工截屏,no,ok,界面截图
+docs/mvp_real.png,screenshot,手工截屏,no,ok,界面截图，页面内未嵌入手写照片
+docs/mvp_result.png,screenshot,手工截屏,no,ok,界面截图
+docs/mvp_review.png,screenshot,手工截屏,no,ok,界面截图
+docs/mvp_ui.png,screenshot,手工截屏,no,ok,界面截图
+docs/split_debug_example.jpg,synthetic,tools/split_page.py,no,ok,白底加等宽字体生成的切行示意，非实拍
+fixtures/demo1.png,synthetic,tools/make_demo_images.py,no,ok,程序生成
+fixtures/demo2.png,synthetic,tools/make_demo_images.py,no,ok,程序生成
+fixtures/demo3.png,synthetic,tools/make_demo_images.py,no,ok,程序生成
+fixtures/demo4.png,synthetic,tools/make_demo_images.py,no,ok,程序生成
+fixtures/demo5.png,synthetic,tools/make_demo_images.py,no,ok,程序生成
+fixtures/demo6.png,synthetic,tools/make_demo_images.py,no,ok,程序生成
+fixtures/demo7.png,synthetic,tools/make_demo_images.py,no,ok,程序生成
+fixtures/geo/g1.png,synthetic,tools/make_geometry_sample.py,no,ok,程序生成
+fixtures/geo/g2.png,synthetic,tools/make_geometry_sample.py,no,ok,程序生成
+fixtures/geo/g3.png,synthetic,tools/make_geometry_sample.py,no,ok,程序生成
+fixtures/geo/g4.png,synthetic,tools/make_geometry_sample.py,no,ok,程序生成
+fixtures/photos/photo_easy.jpg,synthetic,tools/make_photo_sample.py,no,ok,横线纸背景叠加印刷体公式
+fixtures/photos/photo_frac.jpg,synthetic,tools/make_photo_sample.py,no,ok,同上
+fixtures/photos/photo_hard.jpg,synthetic,tools/make_photo_sample.py,no,ok,同上
+fixtures/photos/photo_mid.jpg,synthetic,tools/make_photo_sample.py,no,ok,同上
+fixtures/probe/p1.png,synthetic,tools/probe_cases.py,no,ok,程序生成
+fixtures/probe/p2.png,synthetic,tools/probe_cases.py,no,ok,程序生成
+fixtures/probe/p3.png,synthetic,tools/probe_cases.py,no,ok,程序生成
+fixtures/probe/p4.png,synthetic,tools/probe_cases.py,no,ok,程序生成
+fixtures/probe/p5.png,synthetic,tools/probe_cases.py,no,ok,程序生成
+fixtures/probe/p6.png,synthetic,tools/probe_cases.py,no,ok,程序生成
+fixtures/work/work_fake.jpg,synthetic,tools/make_work_sample.py,no,ok,楷体加旋转加噪点合成
+fixtures/work/work_miss.jpg,synthetic,tools/make_work_sample.py,no,ok,同上
+fixtures/work/work_ok.jpg,synthetic,tools/make_work_sample.py,no,ok,同上
+reports/line_crops_check.png,photo_derived,P0 八页切行,unknown,pending,实拍手写的小图拼贴，发布权待核实
+reports/p0_contact_sheet.jpg,photo_derived,P0 八页拼图,unknown,pending,八页实拍缩略拼贴
+reports/p0_orientation_candidates.jpg,photo_derived,P0 八页纠偏候选,unknown,pending,实拍页旋转候选
+reports/p0_retake_card.jpg,photo_derived,P0 八页补拍卡,unknown,pending,实拍页
+reports/p0_split_check.jpg,photo_derived,P0 八页切行检查,unknown,pending,实拍页加红框
+reports/student_answer.png,screenshot,手工截屏,no,ok,界面截图，页面内未嵌入手写照片
+reports/student_check.png,screenshot,手工截屏,no,ok,界面截图
+"data/photo_results_v*.jsonl",text_snapshot,eval/run_photo_eval.py,unknown,pending,含 P0 八页的识别文本与图片路径，无原图
+"data/cases*.jsonl",text_snapshot,mathagent/cases.py,yes,ok,错题本运行时产物：含学生答案与错因，已被 gitignore，不入库；登记在此只为断言它确实被挡住
