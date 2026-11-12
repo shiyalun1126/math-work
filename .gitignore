@@ -44,7 +44,9 @@ data/photo_results.jsonl
 data/cases.jsonl
 data/cases*.jsonl
 data/cases.json
-data/cases.json
+# 题目归档：搜过的题、批过的页，含题目原文与错因，同样是运行时产物
+data/history.jsonl
+data/history.jsonl.tmp
 
 # 系统
 .DS_Store

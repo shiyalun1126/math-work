@@ -40,6 +40,7 @@ TEXT_SUFFIX = {".jsonl"}
 MUST_IGNORE = [
     "data/cases.jsonl",
     "data/cases_backup.jsonl",
+    "data/history.jsonl",
     "data/photo_results.jsonl",
     "data/raw/W01.jpg",
     "data/crops/x.png",
@@ -122,9 +123,14 @@ def check_coverage(rows: list[dict], files: list[str]) -> list[str]:
 
 def check_stale(rows: list[dict], files: list[str]) -> list[str]:
     tracked = set(files)
+    skip = set(MUST_IGNORE)
     out = []
     for r in rows:
         p = r["path"]
+        if p in skip:
+            # 运行时产物本来就不入库：本地还没生成（比如新建的归档文件）
+            # 或已经清空，都不是"表该清理"的信号。
+            continue
         if "*" in p or p in tracked:
             continue
         if (ROOT / p).exists():

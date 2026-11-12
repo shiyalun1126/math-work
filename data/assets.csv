@@ -37,4 +37,5 @@ reports/p0_split_check.jpg,photo_derived,P0 八页切行检查,no,ok,实拍页�
 reports/student_answer.png,screenshot,手工截屏,no,ok,界面截图，页面内未嵌入手写照片
 reports/student_check.png,screenshot,手工截屏,no,ok,界面截图
 data/photo_results_v*.jsonl,text_snapshot,eval/run_photo_eval.py,no,ok,P0 八页的逐行识别文本与判定，无原图，2026-11-12 确认可公开
+data/history.jsonl,text_snapshot,mathagent/history.py,yes,ok,题目归档运行时产物：含题目原文与错因，已被 gitignore，不入库；登记在此只为断言它确实被挡住
 data/cases*.jsonl,text_snapshot,mathagent/cases.py,yes,ok,错题本运行时产物：含学生答案与错因，已被 gitignore，不入库；登记在此只为断言它确实被挡住

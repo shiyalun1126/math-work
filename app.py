@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
 import gradio as gr
 
-from mathagent import cases, config, guard, photocheck, pipeline, workcheck
+from mathagent import cases, config, guard, history, photocheck, pipeline, workcheck
 from mathagent.latex import parse as parse_latex
 from mathagent.perceive import probe_all
 from mathagent.route import plain as route_plain
@@ -202,6 +203,37 @@ def render(r: PipelineResult, auto: bool = False):
     )
 
 
+def _archived(fn, *args, **kwargs):
+    """归档失败不该把已经算好的结果一起吞掉。
+
+    用户此刻要的是这道题的答案，不是"归档没写进去"。所以这里只往 stderr 留一行，
+    不弹错误——但也不静默：下次看日志能发现归档少了哪一条。
+    """
+    try:
+        fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[history] 归档失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def pend_choices(include_done: bool = False):
+    """待检查项的下拉选项。显示给人看的是时间/题目/第几步，传回去的是记录键。"""
+    return [
+        (f"{r[1]} · {r[2]} · {r[3]} · {r[4]}", r[0])
+        for r in history.pending_rows(include_done)
+    ]
+
+
+def _hist_state(msg: str = ""):
+    """归档页四个组件的一次性刷新。返回顺序要和 outputs 对齐。"""
+    return (
+        history.summary_md(),
+        history.rows(),
+        [r[1:] for r in history.pending_rows()],
+        gr.update(choices=pend_choices(), value=[]),
+        msg,
+    )
+
+
 def on_image(img):
     if not img:
         raise gr.Error("请先上传图片或点一个样例")
@@ -211,6 +243,9 @@ def on_image(img):
         raise gr.Error(str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
+
+    _archived(history.record_search, getattr(r.parsed, "latex", "") or "",
+              source="photo", image=str(img))
 
     if r.route != "geometry":
         return (*render(r), gr.update(value=None, visible=False), *GEO_IDLE_OUTS)
@@ -239,6 +274,7 @@ def on_latex(latex: str):
         r = pipeline.resolve(latex)
     except Exception as exc:  # noqa: BLE001
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
+    _archived(history.record_search, latex, source="text")
     # 手改式子重算只是同一个问题的另一种读法，不去动几何页签里已有的结果
     return (*render(r), gr.update(), *[gr.update() for _ in range(5)])
 
@@ -415,6 +451,7 @@ def _run_grade(problem: str, work: str) -> WorkCheck:
 
 def on_grade(problem, work):
     check = _run_grade(problem, work)
+    _archived(history.record_grade, check, source="text")
     return (
         grade_badge(check),
         step_table_md(check),
@@ -461,6 +498,7 @@ def on_photo(problem, image, progress=gr.Progress()):
     except Exception as exc:  # noqa: BLE001
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
     progress(1.0, desc="完成")
+    _archived(history.record_grade, pc.work, source="photo", image=str(image))
     return (
         grade_badge(pc.work),
         step_table_md(pc.work),
@@ -598,6 +636,7 @@ GEO_IDLE = (
 
 TAB_FORMULA, TAB_GEO = "tab-formula", "tab-geo"
 TAB_WORK, TAB_BOOK = "tab-work", "tab-book"
+TAB_HISTORY = "tab-history"
 GEO_IDLE_OUTS = (None, GEO_IDLE, "", {}, "")
 
 
@@ -876,6 +915,75 @@ with gr.Blocks(title="手写数学识别 Agent · MVP") as demo:
                     "说明那不是粗心，是那个动作还没学会。</div>"
                 )
 
+
+        with gr.Tab("归档", id=TAB_HISTORY):
+            hist_md = gr.Markdown(history.summary_md())
+            with gr.Tabs():
+                with gr.Tab("题目记录"):
+                    gr.Markdown(
+                        "<div style='font-size:12.5px;color:#6B6A65'>"
+                        "搜过的题、批过的页，按时间排，新的在上。时间是你做出这个动作的时刻，"
+                        "不会因为翻看而变。</div>"
+                    )
+                    hist_df = gr.Dataframe(
+                        headers=history.LIST_HEADERS,
+                        value=history.rows(),
+                        interactive=False,
+                        wrap=True,
+                    )
+                with gr.Tab("待检查步骤"):
+                    gr.Markdown(
+                        "<div style='font-size:12.5px;color:#6B6A65'>"
+                        "只收「系统没把握」和「你自己标的」两类。判错的行**不在这里**——"
+                        "那是确定的结论，已经在错题本里了。</div>"
+                    )
+                    pend_df = gr.Dataframe(
+                        headers=history.PENDING_HEADERS[1:],
+                        value=[r[1:] for r in history.pending_rows()],
+                        interactive=False,
+                        wrap=True,
+                    )
+                    with gr.Row():
+                        pend_pick = gr.Dropdown(
+                            choices=pend_choices(),
+                            multiselect=True,
+                            label="选中后标为已复查（可多选）",
+                            scale=5,
+                        )
+                        done_btn = gr.Button("已复查", size="sm", scale=1)
+                        undo_btn = gr.Button("撤销", size="sm", scale=1)
+                    with gr.Accordion("手动加一条（纸质本子上的题也能记）", open=False):
+                        with gr.Row():
+                            mp_problem = gr.Textbox(label="题目", placeholder="x^2-5x+6=0")
+                            mp_step = gr.Textbox(label="哪一步", placeholder="第 4 行 / 判别式那步")
+                        mp_why = gr.Textbox(
+                            label="为什么要回头（可不填）",
+                            placeholder="当时没想明白为什么要先算判别式",
+                        )
+                        mp_add = gr.Button("加进去", size="sm")
+                    pend_msg = gr.Markdown()
+            hist_refresh = gr.Button("刷新", size="sm")
+
+
+    hist_outputs = [hist_md, hist_df, pend_df, pend_pick, pend_msg]
+
+    def _after_mark(keys, undo=False):
+        n = history.reopen(keys or []) if undo else history.mark_done(keys or [])
+        if not n:
+            return _hist_state("没有选中任何一条，先在上面选。")
+        return _hist_state(f"{'撤销' if undo else '标为已复查'} {n} 条。")
+
+    def _add_pending(problem, step, why):
+        if not (problem or "").strip() and not (step or "").strip():
+            return _hist_state("题目和这一步至少填一个。")
+        rec = history.add_pending(problem or "", step or "", why or "")
+        return _hist_state(f"已记一条：`{rec['id']}`，时间就是刚才。")
+
+    hist_refresh.click(lambda: _hist_state(), outputs=hist_outputs)
+    done_btn.click(lambda k: _after_mark(k), inputs=pend_pick, outputs=hist_outputs)
+    undo_btn.click(lambda k: _after_mark(k, undo=True), inputs=pend_pick,
+                   outputs=hist_outputs)
+    mp_add.click(_add_pending, inputs=[mp_problem, mp_step, mp_why], outputs=hist_outputs)
 
     book_refresh.click(
         lambda: (cases.summary_md(), cases.rows()),
