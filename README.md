@@ -57,7 +57,7 @@ python -m eval.run_eval         # 过程批改评测
 python -m eval.run_photo_eval   # 真实拍照评测（需要自己按 data/shotlist.csv 拍）
 ```
 
-`eval/` 下另有 `run_line_eval.py` 专门评估切行质量。评测报告写在 `reports/`，`_smoke_` 开头的是冒烟假数据，不是实测结果。
+`eval/` 下另有 `run_line_eval.py` 专门评估切行质量。评测报告写在 `reports/`，`_smoke_` 开头的是冒烟假数据，不是实测结果。报告 JSON 带全量逐块 `records`、`seed` 与输入指纹（标注/参数 sha256），指标可以只靠它复算；照片评测用 `--results` 指定结果快照，没有可用快照时退出码为 2（未执行），不当作通过。
 
 ## 边界
 

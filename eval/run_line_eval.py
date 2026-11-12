@@ -12,6 +12,10 @@ M²E 是真实手机拍摄的多行公式块，`tex` 用 `\n` 给出逐行标注
 **这个指标的边界**：只比对「行数」，不比对「行框位置」。M²E 没有逐行 bbox，
 所以 exact=100% 也不能证明每行内容切对了；报告里必须连同这句一起引用。
 
+**可复核性**：报告 JSON 带全量逐块 `records`（`id/n_true/n_pred/delta/...`）、
+`seed`、`n_boot` 与输入指纹（标注文件 sha256 + 标注内容 sha256 + 参数 sha256）。
+任何人拿到同一份标注和参数，都能按 records 重算 exact / MAE / CI，不需要重跑切行。
+
 用法：
 
   # 1. 先用默认参数报一个 baseline（不调参，最诚实）
@@ -25,6 +29,7 @@ M²E 是真实手机拍摄的多行公式块，`tex` 用 `\n` 给出逐行标注
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -40,12 +45,16 @@ DEFAULT_IMAGES = ROOT / "data" / "public" / "m2e_raw" / "images"
 REPORTS = ROOT / "reports"
 IMG_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
-# 与 mathagent.lines.split_page 的默认值保持一致，改这里要写进报告
+# 与 mathagent.lines.split_page 的默认值保持一致，改这里要写进报告。
+# page_mode 写 null 就是"按短边自动判断"：M²E 里短边 ≥400 px 的块会走整页模式，
+# 那几张图上下面三个阈值参数根本不生效——这一点必须写在参数块里，否则读者会
+# 以为自己看到的是"这组阈值跑出来的数"。
 DEFAULT_PARAMS = {
     "deskew": True,
     "threshold_ratio": 0.03,
     "min_gap_ratio": 0.012,
     "min_height": 10,
+    "page_mode": None,
 }
 
 # 小网格：M²E 是紧凑公式块小图，整页作业照的默认参数（尤其纠偏）未必适用，
@@ -66,13 +75,20 @@ CAVEATS = [
     "--exclude-align 可排除。",
     "M²E 图多为 70~300 px 的紧凑小图，与整页作业照不是同一分布；"
     "这里的数字不能外推成产品对整页作业的切行准确率。",
+    "`page_mode: null` 表示按短边自动判断：短边 ≥400 px 的块走整页模式，"
+    "此时 `threshold_ratio` / `min_gap_ratio` / `deskew` 对它不生效。",
 ]
 
 
 # --------------------------------------------------------------------------- 数据
 
 
-def load_blocks(path: Path, split: str, limit: int = 0) -> list[dict]:
+def load_blocks(path: Path, split: str, limit: int = 0) -> tuple[list[dict], int]:
+    """返回（本次要评测的块，该 split 的总块数）。
+
+    两者分开是因为 `--limit` 很常用：报告里写"该 split 共 2000 块、这次评测前 500 块"
+    才是实话，把 `len(blocks)` 当总数写会让下一个人以为数据集只有 500 块。
+    """
     if not path.exists():
         raise SystemExit(
             f"找不到 {path}\n"
@@ -86,7 +102,8 @@ def load_blocks(path: Path, split: str, limit: int = 0) -> list[dict]:
         rec = json.loads(ln)
         if rec.get("split") == split:
             rows.append(rec)
-    return rows[:limit] if limit else rows
+    total = len(rows)
+    return (rows[:limit] if limit else rows), total
 
 
 def index_images(directory: Path) -> tuple[dict[str, Path], int]:
@@ -113,6 +130,64 @@ def group_of(n: int) -> str:
     if n == 4:
         return "4 行"
     return "5 行及以上"
+
+
+# --------------------------------------------------------------------------- 指纹
+
+
+def _digest(obj) -> str:
+    blob = json.dumps(obj, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def input_fingerprint(blocks_path: Path, blocks: list[dict], params: dict,
+                      split: str) -> dict:
+    """把「跑的是哪份标注、哪组参数」压成可比对的摘要。
+
+    逐块 records 落盘之后，比对两份报告时顺序应该是：先看指纹一不一样（输入变没变），
+    再看某几块 delta 变了没（代码变没变）。没有指纹就只能重跑一遍再猜。
+    """
+    raw = blocks_path.read_bytes() if blocks_path.exists() else b""
+    labels = [[str(b.get("id", "")), int(b.get("n_lines") or 0),
+               int(bool(b.get("has_align")))] for b in blocks]
+    try:
+        shown = blocks_path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        shown = str(blocks_path)
+    return {
+        "blocks_file": shown,
+        "blocks_sha256": hashlib.sha256(raw).hexdigest(),
+        "labels_sha256": _digest(labels),
+        "params_sha256": _digest(params),
+        "n_loaded": len(blocks),
+        "split": split,
+    }
+
+
+# 偏差分桶：一眼能看出是整体欠切（负数堆在一起）还是零星过切。
+DELTA_BUCKETS = [
+    (None, -3, "≤ -3"),
+    (-2, -2, "-2"),
+    (-1, -1, "-1"),
+    (0, 0, "0（行数一致）"),
+    (1, 1, "+1"),
+    (2, 2, "+2"),
+    (3, None, "≥ +3"),
+]
+
+
+def delta_histogram(records: list[dict]) -> list[list[str]]:
+    rows = []
+    for lo, hi, label in DELTA_BUCKETS:
+        n = sum(1 for r in records
+                if (lo is None or r["delta"] >= lo) and (hi is None or r["delta"] <= hi))
+        rows.append([label, str(n)])
+    return rows
+
+
+def worst_records(records: list[dict], n: int = 15) -> list[dict]:
+    """按 |delta| 挑最该先看目检的块；同分时按 id 稳定排序，两次跑出来的名单一致。"""
+    return sorted(records, key=lambda r: (-abs(r["delta"]), str(r["id"])))[:n]
 
 
 # --------------------------------------------------------------------------- 评测
@@ -152,12 +227,13 @@ def eval_blocks(blocks: list[dict], images: dict[str, Path], params: dict,
             errors.append(f"{b.get('id', name)}: 标注行数为 0")
             continue
         delta = n_pred - n_true
+        size = list(getattr(result, "size", ()) or ())
         records.append({
             "id": b.get("id", name), "n_true": n_true, "n_pred": n_pred,
             "delta": delta, "exact": int(delta == 0),
             "within1": int(abs(delta) <= 1), "group": group_of(n_true),
             "align_group": "竖式对齐" if b.get("has_align") else "普通",
-            "note": note,
+            "size": size, "note": note,
         })
     return {"records": records, "missing": missing, "skipped_align": skipped_align,
             "errors": errors, "debug_written": debug_written}
@@ -237,7 +313,11 @@ def render_md(report: dict) -> str:
         "",
         "## 样本",
         "",
-        f"- 该 split 共 `{report['n_blocks']}` 块；实际评测 `{s.get('n', 0)}` 块",
+        f"- 该 split 共 `{report['n_blocks']}` 块；本次载入 "
+        f"`{report.get('n_loaded', report['n_blocks'])}` 块"
+        + ("（`--limit` 截断，数字只代表这一截）"
+           if report.get("n_loaded", report["n_blocks"]) < report["n_blocks"] else "")
+        + f"；实际评测 `{s.get('n', 0)}` 块",
         f"- 按 --exclude-align 跳过 `{report['skipped_align']}` 块；"
         f"找不到图片 `{len(report['missing'])}`；切图报错 `{len(report['errors'])}`",
     ]
@@ -280,6 +360,58 @@ def render_md(report: dict) -> str:
                 "投影谷底递归切单行带），不能外推成产品对整页作业的准确率。"
                 "产品主场景的指标仍以自采 P0 八页为准。",
             ]
+        recs0 = report.get("records") or []
+        collapsed = [r for r in recs0 if r["n_pred"] == 1 and r["n_true"] >= 3]
+        if len(collapsed) >= max(5, int(0.05 * len(recs0))):
+            lines += [
+                "",
+                f"> ⚠️ **最集中的单一失败**：`{len(collapsed)}` 块真值 ≥3 行却只切出 1 行"
+                f"（占 {metrics.pct(len(collapsed) / len(recs0))}）。"
+                "机制（读代码可复现，不是猜的）：这些小图行距只有 2~3 px，"
+                "`min_gap = max(4, ...)` 把相邻行合并成一条带；"
+                "条带过滤后只剩这一条，`split_tall` 再拿它自己的高度当参照"
+                "（`h <= 1.6 * median_h` 就不切），**单带场景永远不会触发切分**。"
+                "这是算法缺陷，不是阈值没调好——调参救不了它，要改的是「一条带怎么估行高」。",
+            ]
+    recs = report.get("records") or []
+    if recs:
+        fp = report.get("inputs") or {}
+        lines += [
+            "", "## 逐块记录",
+            "",
+            f"- 全量 `{len(recs)}` 条已落盘到同名 JSON 的 `records`，字段："
+            "`id` / `n_true` / `n_pred` / `delta` / `exact` / `within1` / "
+            "`group` / `align_group` / `size` / `note`。任一指标都能按这堆记录重算。",
+            f"- seed=`{report.get('seed')}`、bootstrap 重采样 `{report.get('n_boot')}` 次；"
+            "同一份输入重跑，records 与区间都应逐位相同。",
+            f"- 输入指纹：标注 `sha256:{str(fp.get('blocks_sha256', ''))[:16]}`"
+            f"（本次载入 {fp.get('n_loaded', '?')} 块）、"
+            f"标注内容 `sha256:{str(fp.get('labels_sha256', ''))[:16]}`、"
+            f"参数 `sha256:{str(fp.get('params_sha256', ''))[:16]}`。"
+            "两份报告数字不一致时，先比这三个指纹：参数变了、标注换了，都不算回归。",
+            "",
+            "### 偏差分布（预测行数 − 标注行数）",
+            "",
+            metrics.table(["偏差", "块数"], delta_histogram(recs)),
+            "",
+            "### 偏差最大的 15 块（优先目检）",
+            "",
+        ]
+        rows = []
+        for r in worst_records(recs):
+            note = str(r.get("note") or "")
+            rows.append([r["id"], str(r["n_true"]), str(r["n_pred"]),
+                         f"{r['delta']:+d}", r.get("align_group", ""),
+                         note[:28] + ("…" if len(note) > 28 else "")])
+        lines.append(metrics.table(
+            ["块 ID", "真值", "预测", "偏差", "类型", "切图备注"], rows))
+        lines += [
+            "",
+            "> 复核单块：`--debug N` 只导前 N 张，按 ID 定位要自己在 "
+            "`data/public/m2e/blocks.jsonl` 里找到同名记录，再对该图单独跑一次 "
+            "`split_page`；JSON 里每条都带 `size`，可以先按短边判断它是走了整页模式"
+            "还是块模式。",
+        ]
     lines += ["", "## 切行参数（必须随数字一起报）", "",
               "```json", json.dumps(p, ensure_ascii=False, indent=2), "```", ""]
     if report.get("tune"):
@@ -309,6 +441,27 @@ def render_md(report: dict) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def dump_report(report: dict, path: Path) -> None:
+    """写报告 JSON：头部缩进好看，records 一行一条。
+
+    2000 条逐块记录如果也按 indent=2 展开，文件会膨胀到 600 KB 且 diff 全是噪声；
+    一行一条既省体积，又能让 `git diff` 精确指到"哪一块的 n_pred 变了"——
+    这正是落 records 的初衷。
+    """
+    head = {k: v for k, v in report.items() if k != "records"}
+    text = json.dumps(head, ensure_ascii=False, indent=2).rstrip()
+    recs = report.get("records") or []
+    cut = text.rfind("}")
+    body = text[:cut].rstrip()
+    if recs:
+        lines = ",\n".join("    " + json.dumps(r, ensure_ascii=False, sort_keys=True)
+                           for r in recs)
+        text = f'{body},\n  "records": [\n{lines}\n  ]\n}}\n'
+    else:
+        text = f'{body},\n  "records": []\n}}\n'
+    path.write_text(text, encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- CLI
@@ -347,7 +500,7 @@ def main() -> int:
         params.update(payload.get("best", payload))
         source = str(pf)
 
-    blocks = load_blocks(Path(args.blocks), args.split, args.limit)
+    blocks, n_total = load_blocks(Path(args.blocks), args.split, args.limit)
     images, collisions = index_images(Path(args.images))
     if not images:
         print(f"警告：{args.images} 里没有图片。先跑 tools/fetch_m2e.py unzip。"
@@ -371,7 +524,11 @@ def main() -> int:
     debug_dir = REPORTS / "line_debug" if args.debug else None
     got = eval_blocks(blocks, images, params, skip_align=skip_align,
                       debug_dir=debug_dir, debug_n=args.debug)
-    s = score(got["records"], args.seed, args.n_boot)
+    # 显式落一个种子：默认值在 metrics 里，报告中写"None"等于没写，复现时对不上。
+    seed = args.seed if args.seed is not None else metrics.DEFAULT_SEED
+    s = score(got["records"], seed, args.n_boot)
+    fp = input_fingerprint(Path(args.blocks), blocks, params, args.split)
+    fp["limit"] = args.limit
 
     from datetime import datetime
     report = {
@@ -379,26 +536,33 @@ def main() -> int:
         "dataset": "M²E (Wente47/M2E, ModelScope)",
         "license": "CC BY-NC 4.0",
         "split": args.split, "params": params, "params_source": source,
-        "n_blocks": len(blocks), "skipped_align": got["skipped_align"],
+        "n_blocks": n_total, "n_loaded": len(blocks),
+        "skipped_align": got["skipped_align"],
         "missing": got["missing"], "errors": got["errors"],
         "image_name_collisions": collisions, "caveats": CAVEATS,
-        "metrics": s, "tune": tuned,
+        "seed": seed, "n_boot": args.n_boot, "inputs": fp,
+        "metrics": s, "records": got["records"], "tune": tuned,
         "reproduce": (
             f"F:/PyCharm/python.exe eval/run_line_eval.py --split {args.split}"
             + (f" --params {args.params}" if args.params else "")
             + (f" --limit {args.limit}" if args.limit else "")
+            + (f" --seed {args.seed}" if args.seed is not None else "")
+            + (f" --n-boot {args.n_boot}" if args.n_boot != metrics.N_BOOT else "")
         ),
     }
     tag = f"_{args.tag}" if args.tag else ""
     prefix = ("_smoke_" if args.smoke else "") + "eval_lines" + tag
     REPORTS.mkdir(parents=True, exist_ok=True)
-    (REPORTS / f"{prefix}.json").write_text(
-        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    dump_report(report, REPORTS / f"{prefix}.json")
     (REPORTS / f"{prefix}.md").write_text(render_md(report), encoding="utf-8")
     print(f"评测 {s.get('n', 0)} 块 → {REPORTS / (prefix + '.md')}")
     if s.get("n"):
         print(f"行数完全一致 {metrics.pct(s['exact']['value'], s['exact']['ci'])} · "
               f"MAE {s['mae']:.3f} · bias {s['bias']:+.3f}")
+    else:
+        # 没有可评测的块 ≠ 评测通过。退出码 2 让脚本/CI 没法把空跑当成功。
+        print("状态：未执行（没有可评测的块，报告已写明未产出指标，不当作成功评测）")
+        return 2
     if got["missing"]:
         print(f"有 {len(got['missing'])} 块找不到图片，已从指标中剔除并在报告披露。")
     return 0

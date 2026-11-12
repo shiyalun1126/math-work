@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -274,6 +275,95 @@ def test_smoke_report_does_not_overwrite_official(tmp_path, monkeypatch):
     assert payload["metrics"]["n"] == 1
     assert payload["metrics"]["exact"]["hit"] == 1
     assert payload["license"] == "CC BY-NC 4.0"
+
+
+def test_report_persists_records_seed_and_fingerprint(tmp_path, monkeypatch):
+    """D08：只存汇总的话，exact 变了没人能查是哪几块变了。"""
+    blocks = [
+        {"id": "b1", "split": "test", "image": "1.jpg", "n_lines": 3, "has_align": False},
+        {"id": "b2", "split": "test", "image": "2.jpg", "n_lines": 2, "has_align": True},
+    ]
+    bf = tmp_path / "blocks.jsonl"
+    bf.write_text("\n".join(json.dumps(b) for b in blocks), encoding="utf-8")
+    img_dir = tmp_path / "images"
+    synthetic_three_line_image(img_dir / "1.jpg")
+    synthetic_three_line_image(img_dir / "2.jpg")
+    monkeypatch.setattr(rle, "REPORTS", tmp_path / "reports")
+    monkeypatch.setattr(sys, "argv", [
+        "run_line_eval.py", "--blocks", str(bf), "--images", str(img_dir),
+        "--split", "test", "--smoke", "--n-boot", "20", "--seed", "7",
+    ])
+    assert rle.main() == 0
+    payload = json.loads((tmp_path / "reports" / "_smoke_eval_lines.json").read_text(
+        encoding="utf-8"))
+
+    recs = payload["records"]
+    assert [r["id"] for r in recs] == ["b1", "b2"]
+    assert {r["n_true"] for r in recs} == {2, 3}
+    assert all({"delta", "exact", "within1", "align_group"} <= set(r) for r in recs)
+    # 指标必须能只靠 records 重算出来，否则"逐块可复算"是空话
+    assert sum(r["exact"] for r in recs) == payload["metrics"]["exact"]["hit"]
+    assert sum(abs(r["delta"]) for r in recs) == 1  # b2 真值 2 行、切出 3 行
+
+    assert payload["seed"] == 7 and payload["n_boot"] == 20
+    fp = payload["inputs"]
+    assert fp["split"] == "test" and fp["n_loaded"] == 2
+    for key in ("blocks_sha256", "labels_sha256", "params_sha256"):
+        assert len(fp[key]) == 64, f"{key} 应该是 sha256 十六进制"
+    assert fp["blocks_sha256"] == hashlib.sha256(bf.read_bytes()).hexdigest()
+    assert "--seed 7" in payload["reproduce"]
+
+    md = (tmp_path / "reports" / "_smoke_eval_lines.md").read_text(encoding="utf-8")
+    assert "逐块记录" in md and "偏差分布" in md
+    assert "sha256:" in md and "seed=`7`" in md
+
+
+def test_dump_report_keeps_records_one_per_line(tmp_path):
+    """records 展开成 indent=2 会让文件涨十倍且 diff 全是噪声。"""
+    recs = [{"id": f"b{i}", "n_true": 3, "n_pred": 3, "delta": 0} for i in range(3)]
+    report = {"split": "test", "metrics": {"n": 3}, "records": recs}
+    out = tmp_path / "r.json"
+    rle.dump_report(report, out)
+    text = out.read_text(encoding="utf-8")
+    assert json.loads(text)["records"] == recs
+    assert text.count('\n') <= 12, "每条记录必须压成一行"
+    assert all(f'"id": "b{i}"' in text for i in range(3))
+
+    rle.dump_report({"split": "test", "records": []}, out)
+    assert json.loads(out.read_text(encoding="utf-8"))["records"] == []
+
+
+def test_delta_histogram_and_worst_are_stable():
+    recs = [
+        {"id": "a", "delta": 0}, {"id": "b", "delta": -4}, {"id": "c", "delta": 3},
+        {"id": "d", "delta": -1}, {"id": "e", "delta": 3},
+    ]
+    hist = dict(rle.delta_histogram(recs))
+    assert hist["0（行数一致）"] == "1"
+    assert hist["≤ -3"] == "1"
+    assert hist["≥ +3"] == "2"
+    assert hist["-1"] == "1"
+    # 同分按 id 稳定排序：两次跑不能给出不同名单
+    first = [r["id"] for r in rle.worst_records(recs, n=3)]
+    assert first == [r["id"] for r in rle.worst_records(recs, n=3)]
+    assert set(first) == {"b", "c", "e"}
+
+
+def test_empty_run_exits_nonzero_instead_of_pretending_success(tmp_path, monkeypatch):
+    """没有可评测的块时退出码必须是 2，不能 0——否则 CI 日志像"评测通过"。"""
+    blocks = [{"id": "z", "split": "test", "image": "nope.jpg", "n_lines": 3}]
+    bf = tmp_path / "blocks.jsonl"
+    bf.write_text("\n".join(json.dumps(b) for b in blocks), encoding="utf-8")
+    monkeypatch.setattr(rle, "REPORTS", tmp_path / "reports")
+    monkeypatch.setattr(sys, "argv", [
+        "run_line_eval.py", "--blocks", str(bf), "--images", str(tmp_path / "empty"),
+        "--split", "test", "--n-boot", "20",
+    ])
+    assert rle.main() == 2
+    payload = json.loads((tmp_path / "reports" / "eval_lines.json").read_text(
+        encoding="utf-8"))
+    assert payload["metrics"]["n"] == 0
+    assert payload["missing"] == ["z"]
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 {
   "smoke": false,
+  "status": "ok",
+  "results_source": "data/photo_results.jsonl",
   "summary": {
     "n": 8,
     "n_error": 0,

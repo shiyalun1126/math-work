@@ -9,9 +9,13 @@ data/work_shotlist.csv，按数学规范标，不是从引擎输出反推的。
     python -m eval.run_photo_eval --collect    # 调 VLM 采集，写 data/photo_results.jsonl
     python -m eval.run_photo_eval              # 读结果，出 reports/eval_photo_real.{json,md}
     python -m eval.run_photo_eval --smoke      # 内置假结果跑通报告，离线、不打网络
+    python -m eval.run_photo_eval --results reports/golden_photo_results.jsonl
 
 --collect 会逐个调两个 VLM、按页花钱；重跑前想清楚。
 缺照片只报缺哪些，不算失败。
+**没有可用结果快照时退出码是 2（未执行），不是 0**：空跑被当成"评测通过"是这份
+报告以前最容易误导人的地方。原图不入库，所以 `--results` 允许对一份入库的脱敏
+快照复算指标；但复算只证明"当时的判定是什么"，不等于重跑了一遍识别。
 """
 
 from __future__ import annotations
@@ -128,11 +132,35 @@ def collect(rows: list[dict], only: set[str] | None = None) -> int:
     return 0
 
 
-def load_results() -> list[dict]:
-    if not RESULTS.exists():
+def _shown_path(p: Path) -> str:
+    """报告里写仓库内相对路径：绝对路径换个机器就读不懂，也会暴露本地目录结构。"""
+    try:
+        return p.resolve().relative_to(ROOT).as_posix()
+    except (ValueError, OSError):
+        return str(p)
+
+
+def load_results(path: Path | None = None) -> list[dict]:
+    """读结果快照。默认 `data/photo_results.jsonl`，也可以显式指定。
+
+    `--results` 存在的理由：原图不在仓库里（隐私），但结果快照可以脱敏后入库。
+    评审要复算 `reports/eval_photo_real.md` 时，应该能对它指定的那份快照跑，
+    而不是被迫读 `data/` 下某个"当次运行留下的"文件——那个文件明天就被覆盖了。
+    支持 `.jsonl`（每行一条）与 `.json`（本脚本自己写出的 `{"records": [...]}`）。
+    """
+    p = path or RESULTS
+    if not p.exists():
         return []
+    text = p.read_text(encoding="utf-8")
+    if p.suffix.lower() == ".json":
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            return []
+        recs = payload.get("records") if isinstance(payload, dict) else payload
+        return [r for r in (recs or []) if isinstance(r, dict)]
     out = []
-    for line in RESULTS.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if line:
             try:
@@ -186,13 +214,20 @@ def summarize(records: list[dict]) -> dict:
     }
 
 
-def render(s: dict, records: list[dict], smoke: bool) -> str:
+def render(s: dict, records: list[dict], smoke: bool, source: str = "",
+           source_how: str = "") -> str:
     add: list[str] = []
     add.append("# 真实手写过程页评测报告")
     add.append("")
     if smoke:
         add.append("> **冒烟运行**：结果是内置的假数据，只验证报告管线能否跑通，"
                    "**不是实测数字，不得引用**。")
+        add.append("")
+    if source:
+        how = f"（{source_how}）" if source_how else ""
+        add.append(f"> 结果快照：`{source}`{how}。"
+                   "原图不在仓库里，这份报告只保证**指标可复算**——"
+                   "它能证明当时这批页的判定是什么，不能替代重跑识别。")
         add.append("")
     add.append(f"样本 {s['n']} 页" + (f"，{s['n_error']} 页采集中崩了" if s["n_error"] else "")
                + f"。真值来自 `data/work_shotlist.csv`，按数学规范标注。")
@@ -296,6 +331,8 @@ def main() -> int:
     ap.add_argument("--collect", action="store_true", help="调 VLM 采集结果（花钱）")
     ap.add_argument("--only", default="", help="只采这几页，逗号分隔，如 W01,W05")
     ap.add_argument("--smoke", action="store_true", help="离线假结果跑通报告")
+    ap.add_argument("--results", default="",
+                    help="显式指定结果快照（.jsonl 或 .json）；默认 data/photo_results.jsonl")
     args = ap.parse_args()
 
     rows = truth_rows()
@@ -303,17 +340,26 @@ def main() -> int:
         only = {x.strip() for x in args.only.split(",") if x.strip()} or None
         return collect(rows, only)
 
+    source = ""
     if args.smoke:
         records = smoke_records()
     else:
-        records = load_results()
+        snap = Path(args.results) if args.results else None
+        if snap is not None and not snap.exists():
+            print(f"状态：未执行（--results 指向的 {snap} 不存在）")
+            return 2
+        records = load_results(snap)
+        source = _shown_path(snap or RESULTS)
         missing = [r["id"].strip() for r in rows if find_image(r["id"].strip()) is None]
         if not records:
-            print("还没有采集结果。先跑：")
+            # 空跑不是成功：以前这里 return 0，日志看着像"评测通过"，其实一个字都没测。
+            print("状态：未执行（没有可用的结果快照，本轮不产出任何指标）")
+            print("先跑：")
             print("  F:/PyCharm/python.exe -m eval.run_photo_eval --collect")
             print(f"当前缺照片 {len(missing)}/{len(rows)} 页：{'、'.join(missing[:12])}"
                   + (" …" if len(missing) > 12 else ""))
-            return 0
+            print("或者用 --results 指向一份已有的快照（.jsonl / .json）。")
+            return 2
         if missing:
             print(f"注意：还有 {len(missing)} 页没拍，报告只覆盖已采的 {len(records)} 页。")
 
@@ -321,11 +367,15 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     # 冒烟的假结果绝不写进正式报告路径：评审误打开会当成实测数字引用。
     stem = "_smoke_photo_real" if args.smoke else "eval_photo_real"
-    payload = {"smoke": bool(args.smoke), "summary": s, "records": records}
+    payload = {"smoke": bool(args.smoke), "status": "ok",
+               "results_source": source if not args.smoke else "(内置冒烟数据)",
+               "summary": s, "records": records}
     (OUT_DIR / f"{stem}.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    md = render(s, records, args.smoke)
+    md = render(s, records, args.smoke,
+                "" if args.smoke else source,
+                "" if args.smoke else ("--results 显式指定" if snap else "默认快照"))
     (OUT_DIR / f"{stem}.md").write_text(md, encoding="utf-8")
 
     print(f"结论准确率 {M.pct(s['conclusion']['value'], s['conclusion']['ci'])} "
