@@ -58,6 +58,9 @@ def test_answer_records_once(app):
     # 记的是待解的方程，不是界面上的原始输入
     assert recs[0]["problem"] == "x^2-5x+6=0"
     assert recs[0]["source"] == "text"
+    # 点开要有东西可看：解集和步骤都在快照里
+    assert recs[0]["detail"].get("solutions"), "没存解集，点开就是一张空页"
+    assert recs[0]["detail"].get("steps")
 
 
 def test_check_records_once(app):
@@ -67,6 +70,8 @@ def test_check_records_once(app):
     assert len(grades) == 1
     assert grades[0]["verdict"], "批改记录必须带结论，否则时间线上只有一个空壳"
     assert grades[0]["n_steps"] >= 2
+    # 逐行判定也要落盘，不然点开只剩一句结论
+    assert len(grades[0]["detail"].get("lines") or []) >= 2
 
 
 def test_both_actions_share_one_timeline(app):
@@ -75,23 +80,6 @@ def test_both_actions_share_one_timeline(app):
     rows = history.rows()
     assert len(rows) == 2
     assert {r[1] for r in rows} == {"搜题", "批改"}
-
-
-def test_hist_html_escapes_problem(app, monkeypatch):
-    """题目是用户输入，直接拼进 HTML 会被当成标签。"""
-    monkeypatch.setattr(
-        history, "rows",
-        lambda limit=60: [["11-12 15:00", "搜题", "x<3 且 y>1", "看过", "—"]],
-    )
-    out = app._hist_html()
-    assert "x&lt;3" in out and "x<3" not in out
-
-
-def test_hist_html_empty_points_somewhere(app, monkeypatch):
-    monkeypatch.setattr(history, "rows", lambda limit=60: [])
-    out = app._hist_html()
-    assert "还没有记录" in out
-    assert "对答案" in out, "空态要告诉用户回哪个按钮做一次"
 
 
 def test_pend_html_marks_manual(app, monkeypatch):
@@ -109,12 +97,35 @@ def test_pend_html_empty_explains(app, monkeypatch):
     assert "没有欠着的步骤" in out
 
 
+class _Pick:
+    """假的 SelectData。`_on_pick` 只读 `index`，鸭子类型够用。"""
+
+    def __init__(self, row: int):
+        self.index = [row, 2]
+
+
+def test_pick_opens_that_row(app):
+    """点第几行就要出第几条。行号错位是这类界面最典型的 bug。"""
+    history.record_search("x^2-5x+6=0", detail={"solutions": ["x=2"]})
+    history.record_search("3x+6=15", detail={"solutions": ["x=3"]})
+    newest = app._on_pick(_Pick(0))
+    older = app._on_pick(_Pick(1))
+    assert "3x+6=15" in newest
+    assert "x^2-5x+6=0" in older
+
+
+def test_pick_out_of_range_does_not_raise(app):
+    history.record_search("x^2-5x+6=0")
+    assert "没读到这一行" in app._on_pick(_Pick(99))
+
+
 def test_hist_state_shape(app):
-    """返回 5 项，顺序要和 outputs 对齐。"""
+    """返回 6 项，顺序要和 outputs 对齐。"""
     state = app._hist_state("试一下")
-    assert len(state) == 5
+    assert len(state) == 6
     assert isinstance(state[0], str) and state[0].startswith("###")
     assert state[4] == "试一下"
+    assert "点上面" in state[5], "刷新后详情区要退回提示语，不能留着上一条"
 
 
 def test_pend_choices_key_is_record_key(app):

@@ -226,6 +226,50 @@ body, .gradio-container, .prose, textarea, input, button{
 }
 .hrow{display:flex;gap:8px;align-items:center;}
 #hismsg .prose p{font-size:13px;color:var(--ink2);margin:8px 0 0;}
+
+/* 表格（Dataframe）：为了能点行才用它，样式上要尽力还原成纸上的一张表。
+   外壳、网格、单元格底色、滚动条容器全抹掉，只留一条横线。 */
+#histlist{
+  background:transparent !important;border:0 !important;
+  box-shadow:none !important;padding:0 !important;
+}
+#histlist .table-wrap, #histlist .table-container, #histlist .wrap,
+#histlist .grid-wrap, #histlist .header-wrap{
+  background:transparent !important;border:0 !important;box-shadow:none !important;
+}
+#histlist table{
+  background:transparent !important;border-collapse:collapse !important;
+  width:100% !important;font-size:13.5px !important;
+}
+#histlist thead tr, #histlist tbody tr{background:transparent !important;}
+#histlist thead th{
+  background:transparent !important;color:var(--ink3) !important;
+  font-size:11.5px !important;font-weight:500 !important;letter-spacing:.06em;
+  border:0 !important;border-bottom:1px solid var(--ink3) !important;
+  padding:0 8px 6px !important;text-align:left !important;
+}
+#histlist tbody td{
+  background:transparent !important;border:0 !important;
+  border-bottom:1px solid var(--rule) !important;
+  color:var(--ink) !important;font-size:13.5px !important;
+  padding:9px 8px !important;line-height:1.55 !important;
+  white-space:normal !important;vertical-align:top !important;
+}
+#histlist tbody tr:hover td{
+  background:rgba(46,107,87,.055) !important;cursor:pointer;
+}
+#histlist .cell-wrap{padding:0 !important;background:transparent !important;}
+#histlist th:first-child, #histlist td:first-child{padding-left:2px !important;}
+
+/* 点开的那一条：它是一页正文，不是表格的一部分，用一条细线和上面隔开 */
+#histdetail{
+  margin-top:2px !important;padding-top:16px !important;
+  border-top:1px solid var(--rule) !important;
+}
+#histdetail .prose h3{
+  font-family:"Songti SC","Noto Serif SC",Georgia,serif;
+  font-size:15.5px;letter-spacing:.03em;
+}
 """
 
 HEAD = """
@@ -460,28 +504,19 @@ def _tbl(headers: list[str], body: str, cls: str) -> str:
             f"<tbody>{body}</tbody></table>")
 
 
-def _hist_html(limit: int = 60) -> str:
-    """区一：做过的题，新的在上。
+# 列表只放最近这些条。归档是"翻旧账"，不是档案库：真要找很久以前的，
+# 直接翻 data/history.jsonl 更快。限住条数也让 Dataframe 不用一次画上千行。
+HIST_LIMIT = 60
 
-    标题拼在 HTML 里而不是单独放一个 gr.HTML：组件和组件之间是 Gradio 的
-    block 间距，一行小标题被撑出二十几像素的上下白，纸面就散了。
+PICK_HINT = "> 点上面某一行，看那次写的是什么、判成什么。"
+
+
+def _on_pick(evt: gr.SelectData):
+    """点表格某一行 → 在下面摊开那一条。
+
+    limit 必须和表格的 value 用同一个，否则行号会错位。
     """
-    head = "<div class='hsec'>做过的题</div>"
-    rows = history.rows(limit=limit)
-    if not rows:
-        return (head + "<div class='hint'>还没有记录。在上面「对答案」里拍一道题、"
-                "或者在「批改过程」里批一份，这里就会按时间出现。</div>")
-    body = "".join(
-        "<tr>"
-        f"<td class='t'>{html.escape(r[0])}</td>"
-        f"<td class='k'>{html.escape(r[1])}</td>"
-        f"<td>{html.escape(r[2])}</td>"
-        f"<td class='s'>{html.escape(r[3])}</td>"
-        f"<td class='n'>{html.escape(r[4])}</td>"
-        "</tr>"
-        for r in rows
-    )
-    return head + _tbl(["时间", "做了什么", "题目", "结论", "备注"], body, "log")
+    return history.pick_md(evt.index, limit=HIST_LIMIT)
 
 
 def _pend_html() -> str:
@@ -519,10 +554,11 @@ def _hist_state(msg: str = ""):
     """归档区的一次性刷新。返回顺序要和 outputs 对齐。"""
     return (
         history.summary_md("「对答案」／「批改过程」"),
-        _hist_html(),
+        history.rows(limit=HIST_LIMIT),
         _pend_html(),
         gr.update(choices=pend_choices(), value=[]),
         msg,
+        PICK_HINT,
     )
 
 
@@ -546,7 +582,8 @@ def run_answer(text, image, explain, progress=gr.Progress()):
     # 记的是"求解的那个方程"而不是原始题干：题干里可能带着"解这个方程"这类话，
     # 以后再翻记录时，一眼能认出是哪道题的是式子本身。
     _archived(history.record_search, ans.latex or t,
-              source="text" if t else "photo", image=("" if t else str(image)))
+              source="text" if t else "photo", image=("" if t else str(image)),
+              detail=history.snapshot_answer(ans))
     return _cover_md(ans), _answer_md(ans), _steps_md(ans), _meta_md(meta, ans)
 
 
@@ -728,7 +765,19 @@ with gr.Blocks(title="方程") as demo:
     with gr.Column(visible=False) as pane_hist:
         hist_sum = gr.Markdown(
             history.summary_md("「对答案」／「批改过程」"), elem_id="histsum")
-        hist_list = gr.HTML(_hist_html())
+        # 换成 Dataframe 是为了能点行（自绘 HTML 表格在 Gradio 里收不到点击）。
+        # 代价是丢了手画的表格线，所以在 CSS 里把它的底色、网格、边框全抹掉，
+        # 只留一条横线，尽量还是那张纸。
+        hist_list = gr.Dataframe(
+            headers=history.LIST_HEADERS,
+            value=history.rows(limit=HIST_LIMIT),
+            interactive=False,
+            wrap=True,
+            elem_id="histlist",
+        )
+        hist_detail = gr.Markdown(
+            PICK_HINT, latex_delimiters=LATEX_DELIMS, elem_classes=["out"],
+            elem_id="histdetail")
         pend_list = gr.HTML(_pend_html())
         with gr.Row(elem_classes=["hrow"]):
             pend_pick = gr.Dropdown(
@@ -747,7 +796,9 @@ with gr.Blocks(title="方程") as demo:
             mp_add = gr.Button("记下来", size="sm")
         hist_msg = gr.Markdown(elem_id="hismsg")
 
-    hist_outputs = [hist_sum, hist_list, pend_list, pend_pick, hist_msg]
+    hist_outputs = [hist_sum, hist_list, pend_list, pend_pick, hist_msg, hist_detail]
+
+    hist_list.select(_on_pick, None, hist_detail)
 
     def _after_mark(keys, undo=False):
         n = history.reopen(keys or []) if undo else history.mark_done(keys or [])

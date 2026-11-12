@@ -183,3 +183,118 @@ def test_summary_on_empty_store(store):
     assert "还是空的" in md
     assert history.rows() == []
     assert history.pending_rows() == []
+
+
+# --------------------------------------------------------------------------- 详情快照
+#
+# 「点开那一条」靠的是写入时存下的快照。没存的话点开只有一句结论，
+# 而"当时到底是哪一行错了"恰恰是最想回看的东西。
+
+def test_grade_records_snapshot(store):
+    check = _check(steps=[
+        _step(1, raw="x^2-5x+6=0", verdict="note", reason="题面"),
+        _step(2, raw="(x-2)(x-3)=0"),
+        _step(3, raw="x=2", kind="assign"),
+    ])
+    history.record_grade(check)
+    rec = history._read_raw()[0]
+    lines = rec["detail"]["lines"]
+    assert [ln["i"] for ln in lines] == [1, 2, 3]
+    assert lines[0]["why"] == "题面"
+    assert rec["detail"]["headline"]
+
+
+def test_search_keeps_detail(store):
+    history.record_search("x^2-5x+6=0", detail={"solutions": ["x=2", "x=3"], "steps": []})
+    rec = history._read_raw()[0]
+    assert rec["detail"]["solutions"] == ["x=2", "x=3"]
+
+
+def test_snapshot_is_capped(store):
+    """整页 40 行以上的批改不常见，但真出现时不能把文件撑爆。"""
+    steps = [_step(i, raw=f"x={i}") for i in range(1, 60)]
+    history.record_grade(_check(steps=steps))
+    d = history._read_raw()[0]["detail"]
+    assert len(d["lines"]) == 40
+    assert d["n_more"] == 19
+
+
+def test_detail_md_for_old_record(store):
+    """加快照之前存下的记录要老实说"只有结论"，不能显示成空白页。"""
+    rec = history.record("grade", "x^2-5x+6=0", verdict="partial", headline="解不全")
+    md = history.detail_md(rec)
+    assert "只留了结论" in md
+    assert "解不全" in md
+
+
+def test_detail_md_for_missing_record(store):
+    assert "找不到" in history.detail_md(None)
+
+
+def test_detail_md_grade_table(store):
+    history.record_grade(_check(steps=[
+        # 真实数据里题面那行是 kind=equation + role=problem + verdict=note，
+        # 只按 verdict 翻会显示成"说明"，看不出它是题目本身
+        _step(1, raw="x^2-5x+6=0", verdict="note", role="problem", reason="题面"),
+        _step(2, raw="(x-2)(x-3)=0"),
+    ]))
+    md = history.detail_md(history._read_raw()[0])
+    assert "| 行 | 写的是 | 判定 |" in md
+    assert "题面" in md and "站得住" in md
+
+
+def test_detail_md_answers_question(store):
+    history.record_search(
+        "x^2-5x+6=0",
+        detail={"solutions": ["x=2", "x=3"], "steps": [{"t": "原式", "x": "x^2-5x+6=0"}]},
+    )
+    md = history.detail_md(history._read_raw()[0])
+    assert "答案" in md and "x=2" in md
+    assert "怎么来的" in md
+
+
+def test_tex_keeps_chinese_out_of_math(store):
+    """中文句子包进 `$` 会变成一串斜体乱码。"""
+    assert history._tex("解这个方程") == "解这个方程"
+    assert history._tex("x^2-5x+6=0") == "$x^2-5x+6=0$"
+
+
+def test_tex_tolerates_chinese_inside_text(store):
+    """`\\text{或}` 是 LaTeX 内部的中文，整条仍要当公式渲染。"""
+    got = history._tex(r"x=2 \quad\text{或}\quad x=3")
+    assert got.startswith("$") and got.endswith("$")
+
+
+def test_cell_escapes_pipe(store):
+    assert history._cell("a|b") == "a\\|b"
+
+
+def test_listing_ids_line_up(store):
+    """行号和记录 id 必须是同一次排序的结果，否则点 A 看到 B。"""
+    for p in ("a", "b", "c"):
+        history.record_search(p)
+    rows, ids = history.listing()
+    assert len(rows) == len(ids) == 3
+    assert [history.by_id(k)["problem"] for k in ids] == [r[2] for r in rows]
+
+
+def test_same_second_newest_first(store):
+    """ts 只到秒，同一秒里连做两次时，后做的要排在上面。"""
+    history.record("search", "first")
+    history.record("search", "second")
+    assert [r[2] for r in history.rows()] == ["second", "first"]
+
+
+def test_pick_md_maps_row_to_record(store):
+    """行号到记录的唯一映射在这里，两个界面都靠它。"""
+    history.record_search("first")
+    history.record_search("second")
+    assert "second" in history.pick_md(0)
+    assert "first" in history.pick_md(1)
+    # 前端传过来的可能是 [row, col]
+    assert "second" in history.pick_md([0, 3])
+
+
+def test_pick_md_out_of_range(store):
+    assert "没读到这一行" in history.pick_md(9)
+    assert "没读到这一行" in history.pick_md(None)

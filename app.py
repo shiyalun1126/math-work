@@ -215,15 +215,24 @@ def pend_choices(include_done: bool = False):
     ]
 
 
+PICK_HINT = "> 点上面某一行，看那次到底判成了什么。"
+
+
 def _hist_state(msg: str = ""):
-    """归档页四个组件的一次性刷新。返回顺序要和 outputs 对齐。"""
+    """归档页几个组件的一次性刷新。返回顺序要和 outputs 对齐。"""
     return (
         history.summary_md(),
         history.rows(),
         [r[1:] for r in history.pending_rows()],
         gr.update(choices=pend_choices(), value=[]),
         msg,
+        PICK_HINT,
     )
+
+
+def _on_pick(evt: gr.SelectData):
+    """点表格某一行 → 摊开那一条。行号到 id 的映射在 history.pick_md 里。"""
+    return history.pick_md(evt.index)
 
 
 def on_image(img):
@@ -237,7 +246,8 @@ def on_image(img):
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
 
     _archived(history.record_search, getattr(r.parsed, "latex", "") or "",
-              source="photo", image=str(img))
+              source="photo", image=str(img),
+              detail=history.snapshot_solved(r.solved))
 
     if r.route != "geometry":
         return (*render(r), gr.update(value=None, visible=False), *GEO_IDLE_OUTS)
@@ -266,7 +276,8 @@ def on_latex(latex: str):
         r = pipeline.resolve(latex)
     except Exception as exc:  # noqa: BLE001
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
-    _archived(history.record_search, latex, source="text")
+    _archived(history.record_search, latex, source="text",
+              detail=history.snapshot_solved(r.solved))
     # 手改式子重算只是同一个问题的另一种读法，不去动几何页签里已有的结果
     return (*render(r), gr.update(), *[gr.update() for _ in range(5)])
 
@@ -915,7 +926,7 @@ with gr.Blocks(title="手写数学识别 Agent · MVP") as demo:
                     gr.Markdown(
                         "<div style='font-size:12.5px;color:#6B6A65'>"
                         "搜过的题、批过的页，按时间排，新的在上。时间是你做出这个动作的时刻，"
-                        "不会因为翻看而变。</div>"
+                        "不会因为翻看而变。<b>点一行</b>看那次判成了什么。</div>"
                     )
                     hist_df = gr.Dataframe(
                         headers=history.LIST_HEADERS,
@@ -923,6 +934,8 @@ with gr.Blocks(title="手写数学识别 Agent · MVP") as demo:
                         interactive=False,
                         wrap=True,
                     )
+                    hist_detail = gr.Markdown(
+                        PICK_HINT, latex_delimiters=LATEX_DELIMS)
                 with gr.Tab("待检查步骤"):
                     gr.Markdown(
                         "<div style='font-size:12.5px;color:#6B6A65'>"
@@ -957,7 +970,8 @@ with gr.Blocks(title="手写数学识别 Agent · MVP") as demo:
             hist_refresh = gr.Button("刷新", size="sm")
 
 
-    hist_outputs = [hist_md, hist_df, pend_df, pend_pick, pend_msg]
+    hist_outputs = [hist_md, hist_df, pend_df, pend_pick, pend_msg, hist_detail]
+    hist_df.select(_on_pick, None, hist_detail)
 
     def _after_mark(keys, undo=False):
         n = history.reopen(keys or []) if undo else history.mark_done(keys or [])

@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import uuid
 from datetime import datetime
@@ -140,6 +141,7 @@ def record(
     headline: str = "",
     n_steps: int = 0,
     pending: list[dict] | None = None,
+    detail: dict | None = None,
 ) -> dict:
     """落一条事件。重复点击在 3 秒内会被吞掉，返回已存在的那条。"""
     if kind not in KINDS:
@@ -161,11 +163,110 @@ def record(
         "headline": headline or "",
         "n_steps": int(n_steps or 0),
         "pending": list(pending or []),
+        "detail": dict(detail or {}),
     }
     HISTORY.parent.mkdir(parents=True, exist_ok=True)
     with HISTORY.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return rec
+
+
+# ------------------------------------------------------------------- 结果快照
+#
+# 列表只需要几个字（时间/题目/结论），详情要的是"那次到底判了什么"。
+# 两者放在同一条记录里，是因为它们同生同死：拆成两个文件就多一个可能对不上的东西。
+#
+# 代价是 jsonl 会变大（一次整页批改约 4~6 KB）。列表页每次都全读这个文件，
+# 所以快照必须**裁剪**：行数封顶、每个字段截断。不裁的话一千条就是几十兆，
+# 点一下「归档」要等半秒。真到那一步再拆文件，现在不值得。
+
+_MAX_LINES = 40
+_MAX_STEPS = 20
+
+
+def _clip(text: Any, n: int) -> str:
+    """按**字符**截，不按字节。中文一个字算一个，截出来不会切坏半个字。"""
+    s = " ".join(str(text or "").split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def snapshot_check(check: Any) -> dict:
+    """一次批改的快照：逐行写了什么、判成什么、为什么。
+
+    ``counter``（反例）留着——它是"凭什么说这步不对"的唯一证据，
+    回头再看时最想找的就是它。
+    """
+    lines = []
+    for s in getattr(check, "steps", []) or []:
+        kind = getattr(s, "kind", "") or ""
+        verdict = getattr(s, "verdict", "") or ""
+        if kind == "note":
+            continue
+        lines.append({
+            "i": int(getattr(s, "idx", 0) or 0),
+            "t": _clip(getattr(s, "latex", "") or getattr(s, "raw", ""), 90),
+            "v": verdict,
+            "k": kind,
+            "r": getattr(s, "role", "") or "",
+            "why": _clip(getattr(s, "reason", ""), 70),
+            "c": _clip(getattr(s, "counter", ""), 70),
+        })
+    return {
+        "headline": _clip(getattr(check, "headline", ""), 180),
+        "advice": _clip(getattr(check, "advice", ""), 400),
+        "expected": [_clip(x, 60) for x in (getattr(check, "expected", []) or [])[:6]],
+        "got": [_clip(x, 60) for x in (getattr(check, "got", []) or [])[:6]],
+        "lines": lines[:_MAX_LINES],
+        "n_more": max(0, len(lines) - _MAX_LINES),
+    }
+
+
+def snapshot_answer(ans: Any) -> dict:
+    """一次搜题的快照：答案、解集、推导步骤。"""
+    topic = getattr(ans, "topic", None)
+    steps = []
+    for st in (getattr(ans, "steps", []) or [])[:_MAX_STEPS]:
+        if isinstance(st, dict):
+            steps.append({
+                "t": _clip(st.get("title", ""), 80),
+                "x": _clip(st.get("latex", ""), 160),
+            })
+        else:
+            steps.append({"t": "", "x": _clip(st, 160)})
+    return {
+        "answer": _clip(getattr(ans, "answer_latex", ""), 200),
+        "solutions": [_clip(x, 60) for x in (getattr(ans, "solutions", []) or [])[:8]],
+        "topic": _clip(getattr(topic, "label", ""), 40),
+        "steps": steps,
+        "branches": [_clip(x, 120) for x in (getattr(ans, "branches", []) or [])[:6]],
+    }
+
+
+def snapshot_solved(solved: Any) -> dict:
+    """完整版搜题链路的快照。和 ``snapshot_answer`` 是同一种形状，只是源对象不同：
+
+    学生版走 ``equations.Answer``，完整版走 ``SolveResult``（通用求解，不只方程）。
+    详情面板只认形状，所以两者都摊成 ``{answer, solutions, steps}``。
+    """
+    steps = []
+    for st in (getattr(solved, "steps", []) or [])[:_MAX_STEPS]:
+        if isinstance(st, dict):
+            steps.append({
+                "t": _clip(st.get("title", ""), 80),
+                "x": _clip(st.get("latex", ""), 160),
+            })
+        else:
+            steps.append({
+                "t": _clip(getattr(st, "title", ""), 80),
+                "x": _clip(getattr(st, "latex", ""), 160),
+            })
+    return {
+        "answer": "",
+        "solutions": [_clip(x, 60) for x in (getattr(solved, "solutions", []) or [])[:8]],
+        "topic": _clip(getattr(solved, "kind", ""), 40),
+        "steps": steps,
+    }
+
 
 
 def _why_unclear(step: Any) -> str:
@@ -208,7 +309,7 @@ def pending_from_check(check: Any) -> list[dict]:
 
 
 def record_grade(check: Any, *, source: str = "text", image: str = "") -> dict:
-    """一次批改落一条。pending 自动从步骤里抽，调用方不用自己判断。"""
+    """一次批改落一条。pending 和 detail 都从 check 里自动抽，调用方不用自己判断。"""
     return record(
         "grade",
         getattr(check, "problem", ""),
@@ -219,11 +320,15 @@ def record_grade(check: Any, *, source: str = "text", image: str = "") -> dict:
         headline=getattr(check, "headline", ""),
         n_steps=len(getattr(check, "steps", []) or []),
         pending=pending_from_check(check),
+        detail=snapshot_check(check),
     )
 
 
-def record_search(problem: str, *, source: str = "text", image: str = "") -> dict:
-    return record("search", problem, source=source, image=image)
+def record_search(
+    problem: str, *, source: str = "text", image: str = "", detail: dict | None = None
+) -> dict:
+    """一次搜题落一条。``detail`` 传 ``snapshot_answer(ans)``，没有就留空。"""
+    return record("search", problem, source=source, image=image, detail=detail)
 
 
 def add_pending(problem: str, text: str, why: str = "") -> dict:
@@ -305,10 +410,31 @@ def _verdict_word(rec: dict) -> str:
     return VERDICTS.get(rec.get("verdict", ""), rec.get("verdict", "") or "—")
 
 
-def rows(limit: int = 200) -> list[list]:
-    """区一：全部事件，新的在前。"""
-    recs = sorted(_read_raw(), key=lambda r: r.get("ts", ""), reverse=True)
-    out = []
+def _newest_first() -> list[dict]:
+    """按时间倒序。同一秒内，后写进来的排前面。
+
+    ``ts`` 只到秒，连着做两次操作会撞在同一秒上。只按 ``ts`` 排序是**稳定排序**，
+    撞秒时保持文件原序，等于"先做的排在上面"——和"新的在上"正好反了。
+    所以把文件里的位置也当第二排序键，并且一起倒过来。
+    """
+    recs = _read_raw()
+    order = sorted(
+        range(len(recs)),
+        key=lambda i: (recs[i].get("ts", ""), i),
+        reverse=True,
+    )
+    return [recs[i] for i in order]
+
+
+def listing(limit: int = 200) -> tuple[list[list], list[str]]:
+    """区一 + 每行对应的记录 id。
+
+    表格只能传二维数组，点行回来的是行号，**行号和记录的对应关系必须由这里给**。
+    让 ``rows()`` 和它各排一次序是错的：两边只要有一处过滤条件不同，
+    点第 3 行看到的就是第 4 条。所以只保留这一份实现。
+    """
+    recs = _newest_first()
+    out, ids = [], []
     for rec in recs[:limit]:
         pend = [p for p in (rec.get("pending") or []) if not p.get("done")]
         note = rec.get("error_type") or ""
@@ -321,13 +447,43 @@ def rows(limit: int = 200) -> list[list]:
             _verdict_word(rec),
             note or rec.get("headline", "")[:30] or "—",
         ])
-    return out
+        ids.append(rec.get("id", ""))
+    return out, ids
+
+
+def rows(limit: int = 200) -> list[list]:
+    """区一：全部事件，新的在前。"""
+    return listing(limit)[0]
+
+
+def by_id(key: str) -> dict | None:
+    """按 id 取一条完整记录。找不到返回 None（文件被人手工删过行）。"""
+    for rec in _read_raw():
+        if rec.get("id") == key:
+            return rec
+    return None
+
+
+def pick_md(index: Any, limit: int = 200) -> str:
+    """表格第 ``index`` 行 → 那一条的详情。
+
+    行号和 id 的对应关系只在 ``listing()`` 里存在，所以这个映射也只写一份：
+    两个界面各抄一遍，迟早有一边用了不同的 limit。
+    """
+    if isinstance(index, (list, tuple)):
+        index = index[0] if index else None
+    _, ids = listing(limit=limit)
+    try:
+        key = ids[int(index)]
+    except (TypeError, ValueError, IndexError):
+        return "### 没读到这一行\n\n刷新一下再点。"
+    return detail_md(by_id(key))
 
 
 def pending_rows(include_done: bool = False) -> list[list]:
     """区二：把 pending 摊平。默认只看还没复查的。"""
     out = []
-    for rec in sorted(_read_raw(), key=lambda r: r.get("ts", ""), reverse=True):
+    for rec in _newest_first():
         for item in rec.get("pending") or []:
             done = bool(item.get("done"))
             if done and not include_done:
@@ -381,3 +537,154 @@ def summary_md(hint: str = "") -> str:
     else:
         lines.append("待检查都清空了。" + (f"（复查过 {done} 步）" if done else ""))
     return "\n".join(lines)
+
+
+# --------------------------------------------------------------------- 详情
+
+# 行判定翻成人话。和 VERDICTS 分开：那个是"整份的结论"，这个是"单行的命运"。
+LINE_WORDS = {
+    "ok": "站得住",
+    "partial": "漏解",
+    "wrong": "不成立",
+    "unknown": "没判定",
+    "note": "说明",
+}
+
+KIND_WORDS = {
+    "problem": "题面",
+    "assign": "答案",
+    "unparsed": "没读出",
+    "prose": "文字",
+}
+
+
+def _tex(text: Any) -> str:
+    """能当公式渲染的包上 `$`，带中文的按原文放着。
+
+    题面通常是 `2x+y=4` 这种纯式子，包起来好看；但拍照批改时 `problem`
+    也可能是"解这个方程"一整句话，包进 `$` 会变成一串斜体乱码。
+
+    `\\text{或}` 这种是 LaTeX **内部**的中文，不能当"这句话是中文"的证据——
+    先把它剔掉再判断，否则 `x=2 \\quad\\text{或}\\quad x=3` 会被当成中文裸着显示。
+    """
+    s = str(text or "").strip()
+    if not s:
+        return "—"
+    bare = re.sub(r"\\text\{[^}]*\}", "", s)
+    return s if re.search(r"[\u4e00-\u9fff]", bare) else f"${s}$"
+
+
+def _cell(text: Any) -> str:
+    """表格单元格：`|` 不转义会把一行拆成两列。"""
+    return str(text or "—").replace("|", "\\|") or "—"
+
+
+def detail_md(rec: dict | None) -> str:
+    """把一条记录摊开成能读的一页。
+
+    返回 Markdown 而不是 HTML：两个界面各自有排版，但"一行一步、左边数字"
+    这种结构用 Markdown 表格写一次就够，两边 inherited 同一套样式。
+    """
+    if not rec:
+        return "### 这条记录找不到了\n\n归档文件被人改过，或者那条已经被删掉。"
+
+    when = _clock(rec.get("ts", ""))
+    kind = KINDS.get(rec.get("kind", ""), rec.get("kind", ""))
+    problem = rec.get("problem", "")
+    head = [f"### {when} · {kind}", "", f"**{_tex(problem)}**", ""]
+    detail = rec.get("detail") or {}
+
+    if not detail:
+        head += [
+            f"这条记录的结论是 **{_verdict_word(rec)}**"
+            + (f"——{rec.get('headline')}" if rec.get("headline") else "。"),
+            "",
+            "> 它是加「明细」之前存下的，当时只留了结论。"
+            "以后新做的记录，点开能看到逐行怎么判的。",
+        ]
+        return "\n".join(head)
+
+    if rec.get("kind") == "search":
+        head += _search_body(detail)
+    else:
+        head += _grade_body(detail)
+    if rec.get("source") == "photo":
+        # 拍照进来的记录，用户点开第一反应是"让我再瞅一眼那张卷子"。
+        # 图是 Gradio 的临时文件，重启就没了，与其让人找，不如直说。
+        head += ["> 原图是当时上传的临时文件，已经清掉了；下面是当时识别出来的内容。", ""]
+    return "\n".join(head)
+
+
+def _search_body(d: dict) -> list[str]:
+    out: list[str] = []
+    answer = (d.get("answer") or "").strip()
+    sols = d.get("solutions") or []
+    if answer:
+        out += [f"答案：**{_tex(answer)}**", ""]
+    elif sols:
+        out += [f"答案：**{'，'.join(_tex(x) for x in sols)}**", ""]
+    else:
+        out += ["这道题没解出来，没留下答案。", ""]
+
+    if d.get("topic"):
+        out += [f"题型：{d['topic']}", ""]
+    if d.get("branches"):
+        out += ["**含参，分情况：**", ""]
+        out += [f"- {_tex(b)}" for b in d["branches"]]
+        out.append("")
+
+    steps = d.get("steps") or []
+    if steps:
+        out += ["**怎么来的：**", ""]
+        for n, st in enumerate(steps, 1):
+            title = (st.get("t") or "").strip()
+            body = _tex(st.get("x", ""))
+            out.append(f"{n}. {title + ' —— ' if title else ''}{body}")
+        out.append("")
+    return out
+
+
+def _grade_body(d: dict) -> list[str]:
+    out: list[str] = []
+    if d.get("headline"):
+        out += [f"结论：**{d['headline']}**", ""]
+
+    lines = d.get("lines") or []
+    if lines:
+        out += ["| 行 | 写的是 | 判定 |", "|:--:|---|---|"]
+        for ln in lines:
+            word = LINE_WORDS.get(ln.get("v", ""), ln.get("v") or "—")
+            # 题面那一行 verdict 是 note，光写"说明"看不出它是题目本身
+            if ln.get("r") == "problem" or ln.get("k") == "problem":
+                word = "题面"
+            elif ln.get("k") in KIND_WORDS and ln.get("k") != "equation":
+                word = f"{KIND_WORDS[ln['k']]} · {word}"
+            out.append(f"| {ln.get('i', '')} | {_cell(_tex(ln.get('t', '')))} | {_cell(word)} |")
+        out.append("")
+        if d.get("n_more"):
+            out += [f"> 后面还有 {d['n_more']} 行没列出来（快照封顶 40 行）。", ""]
+
+    # 只挑有问题的行说原因：全列出来会把这一页撑成一张长表，而 ok 的行没有话要说。
+    notes = []
+    for ln in lines:
+        if ln.get("v") in ("ok", "note") or not (ln.get("why") or ln.get("c")):
+            continue
+        pos = f"第 {ln.get('i')} 行"
+        why = (ln.get("why") or "").strip()
+        counter = (ln.get("c") or "").strip()
+        msg = why or "这一步不成立"
+        if counter:
+            msg += f"（反例：{_tex(counter)}）"
+        notes.append(f"- **{pos}**：{msg}")
+    if notes:
+        out += ["**为什么：**", ""] + notes + [""]
+
+    if d.get("expected") or d.get("got"):
+        exp = "，".join(_tex(x) for x in (d.get("expected") or []))
+        got = "，".join(_tex(x) for x in (d.get("got") or []))
+        if exp or got:
+            out += [f"应有：{exp or '—'}　实际：{got or '—'}", ""]
+
+    if d.get("advice"):
+        out += [f"> {d['advice']}", ""]
+    return out
