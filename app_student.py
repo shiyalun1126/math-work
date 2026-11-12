@@ -15,12 +15,13 @@
 
 from __future__ import annotations
 
+import html
 import os
 import re
 
 import gradio as gr
 
-from mathagent import equations, guard, photocheck, workcheck
+from mathagent import equations, guard, history, photocheck, workcheck
 from mathagent.types import WorkCheck
 
 LATEX_DELIMS = [
@@ -180,6 +181,51 @@ body, .gradio-container, .prose, textarea, input, button{
 /* 行图 */
 #lineimgs img{width:100%;height:auto;display:block;border:1px solid var(--rule);
   border-radius:6px;background:#fff;}
+
+/* ---------- 归档 ---------- */
+/* 这里也不用 Dataframe：学生版通篇是纸上的表格，插一个带滚动条和数据网格的
+   组件会立刻变成"后台"。自己画 <table>，样式和上面逐行表同一套。 */
+#histsum .prose h3{
+  font-family:"Songti SC","Noto Serif SC",Georgia,serif;
+  font-size:16px;font-weight:600;letter-spacing:.03em;color:var(--ink);
+  margin:2px 0 8px;padding:0;border:0;
+}
+#histsum .prose p{font-size:13px;color:var(--ink3);margin:4px 0 0;line-height:1.75;}
+#histsum .prose strong{font-weight:600;color:var(--ink2);}
+
+.htbl{width:100%;border-collapse:collapse;font-size:13.5px;table-layout:fixed;}
+.htbl th{
+  text-align:left;font-weight:500;font-size:11.5px;letter-spacing:.06em;
+  color:var(--ink3);border-bottom:1px solid var(--ink3);padding:0 8px 6px;
+  white-space:nowrap;
+}
+.htbl td{
+  border-bottom:1px solid var(--rule);padding:9px 8px;
+  vertical-align:top;line-height:1.55;
+}
+.htbl tr:last-child td{border-bottom:0;}
+.htbl td.t{color:var(--ink3);font-size:12px;white-space:nowrap;
+  font-variant-numeric:tabular-nums;}
+.htbl td.k{color:var(--ink3);font-size:12px;white-space:nowrap;}
+.htbl td.n{color:var(--ink2);font-size:12.5px;}
+.htbl td.s{white-space:nowrap;font-size:12.5px;}
+.htbl .done{color:var(--ink3);text-decoration:line-through;}
+.htbl .wait{color:var(--warn);}
+.htbl .who{color:var(--ink3);font-size:11.5px;margin-left:4px;}
+.htbl .pos{color:var(--ink3);font-size:12px;margin-right:5px;}
+.htbl .why{color:var(--ink3);font-size:12.5px;margin-top:4px;line-height:1.6;}
+.htbl.log th:nth-child(1){width:74px;}
+.htbl.log th:nth-child(2){width:48px;}
+.htbl.log th:nth-child(4){width:58px;}
+.htbl.pend th:nth-child(1){width:150px;}
+.htbl.pend th:nth-child(3){width:58px;}
+.hint{font-size:13px;color:var(--ink3);line-height:1.85;margin:12px 0;}
+.hsec{
+  font-size:11.5px;letter-spacing:.1em;color:var(--ink3);
+  margin:22px 0 6px;text-transform:none;
+}
+.hrow{display:flex;gap:8px;align-items:center;}
+#hismsg .prose p{font-size:13px;color:var(--ink2);margin:8px 0 0;}
 """
 
 HEAD = """
@@ -402,6 +448,84 @@ def _scope_note(problem: str) -> str:
     return ""
 
 
+# ---------------------------------------------------------------- 归档
+
+# 归档写失败不该把已经算好的答案一起吞掉，具体处理在 history.safe 里。
+_archived = history.safe
+
+
+def _tbl(headers: list[str], body: str, cls: str) -> str:
+    th = "".join(f"<th>{h}</th>" for h in headers)
+    return (f"<table class='htbl {cls}'><thead><tr>{th}</tr></thead>"
+            f"<tbody>{body}</tbody></table>")
+
+
+def _hist_html(limit: int = 60) -> str:
+    """区一：做过的题，新的在上。
+
+    标题拼在 HTML 里而不是单独放一个 gr.HTML：组件和组件之间是 Gradio 的
+    block 间距，一行小标题被撑出二十几像素的上下白，纸面就散了。
+    """
+    head = "<div class='hsec'>做过的题</div>"
+    rows = history.rows(limit=limit)
+    if not rows:
+        return (head + "<div class='hint'>还没有记录。在上面「对答案」里拍一道题、"
+                "或者在「批改过程」里批一份，这里就会按时间出现。</div>")
+    body = "".join(
+        "<tr>"
+        f"<td class='t'>{html.escape(r[0])}</td>"
+        f"<td class='k'>{html.escape(r[1])}</td>"
+        f"<td>{html.escape(r[2])}</td>"
+        f"<td class='s'>{html.escape(r[3])}</td>"
+        f"<td class='n'>{html.escape(r[4])}</td>"
+        "</tr>"
+        for r in rows
+    )
+    return head + _tbl(["时间", "做了什么", "题目", "结论", "备注"], body, "log")
+
+
+def _pend_html() -> str:
+    """区二：欠着的步骤。判错的行不在这里——那是结论，已经在错题本里了。"""
+    head = "<div class='hsec'>这几步还等你回头看</div>"
+    rows = history.pending_rows()
+    if not rows:
+        return (head + "<div class='hint'>没有欠着的步骤。批改时系统没认准的行会落在这里，"
+                "你自己标过的也会。</div>")
+    body = ""
+    for r in rows:
+        # [key, 时间, 题目, 位置, 这一步, 为什么, 谁标的, 状态]
+        who = ("" if r[6] == "系统"
+               else f"<span class='who'>· {html.escape(r[6])}标的</span>")
+        step = html.escape(r[4])
+        if r[5] and r[5] != "—":
+            step += f"<div class='why'>{html.escape(r[5])}</div>"
+        body += (
+            "<tr>"
+            f"<td class='t'>{html.escape(r[1])}</td>"
+            f"<td>{html.escape(r[2])}{who}</td>"
+            f"<td><span class='pos'>{html.escape(r[3])}</span>{step}</td>"
+            f"<td class='s wait'>{html.escape(r[7])}</td>"
+            "</tr>"
+        )
+    return head + _tbl(["时间", "题目", "哪一步", "状态"], body, "pend")
+
+
+def pend_choices() -> list[tuple[str, str]]:
+    """下拉选项。给人看的是「时间 · 题目 · 哪一步」，传回去的是记录键。"""
+    return [(f"{r[1]} · {r[2]} · {r[3]}", r[0]) for r in history.pending_rows()]
+
+
+def _hist_state(msg: str = ""):
+    """归档区的一次性刷新。返回顺序要和 outputs 对齐。"""
+    return (
+        history.summary_md("「对答案」／「批改过程」"),
+        _hist_html(),
+        _pend_html(),
+        gr.update(choices=pend_choices(), value=[]),
+        msg,
+    )
+
+
 # ---------------------------------------------------------------- 动作
 
 def run_answer(text, image, explain, progress=gr.Progress()):
@@ -419,6 +543,10 @@ def run_answer(text, image, explain, progress=gr.Progress()):
     except Exception as exc:  # noqa: BLE001
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
     progress(1.0, desc="好了")
+    # 记的是"求解的那个方程"而不是原始题干：题干里可能带着"解这个方程"这类话，
+    # 以后再翻记录时，一眼能认出是哪道题的是式子本身。
+    _archived(history.record_search, ans.latex or t,
+              source="text" if t else "photo", image=("" if t else str(image)))
     return _cover_md(ans), _answer_md(ans), _steps_md(ans), _meta_md(meta, ans)
 
 
@@ -448,6 +576,7 @@ def run_check(problem, text, image, progress=gr.Progress()):
         if w:
             check = workcheck.grade(w, problem=problem or "")
             progress(1.0, desc="好了")
+            _archived(history.record_grade, check, source="text")
             return (
                 _verdict_html(check, _scope_note(problem)),
                 _table_md(check),
@@ -463,6 +592,7 @@ def run_check(problem, text, image, progress=gr.Progress()):
     except Exception as exc:  # noqa: BLE001
         raise gr.Error(f"{type(exc).__name__}: {exc}") from exc
     progress(1.0, desc="好了")
+    _archived(history.record_grade, pc.work, source="photo", image=str(image))
     doubt = _doubt_choices(pc)
     has_photo = bool(pc.lines)
     return (
@@ -502,13 +632,18 @@ def run_regrade(fix_text, doubted, problem, state, progress=gr.Progress()):
 
 
 def switch(mode: str):
-    """两个模式互相切，返回 (按钮样式、两块可见性)。"""
-    answer = mode == "answer"
+    """三块互相切，返回 (三个按钮的样式、三块可见性)。
+
+    做成"一个被选中其余两个退成灰字"，而不是 Gradio 的 Tabs：
+    Tabs 自带下划线和容器，会把纸面切成一块块的界面件。
+    """
     return (
-        gr.update(variant="primary" if answer else "secondary"),
-        gr.update(variant="secondary" if answer else "primary"),
-        gr.update(visible=answer),
-        gr.update(visible=not answer),
+        gr.update(variant="primary" if mode == "answer" else "secondary"),
+        gr.update(variant="primary" if mode == "check" else "secondary"),
+        gr.update(variant="primary" if mode == "hist" else "secondary"),
+        gr.update(visible=mode == "answer"),
+        gr.update(visible=mode == "check"),
+        gr.update(visible=mode == "hist"),
     )
 
 
@@ -521,6 +656,7 @@ with gr.Blocks(title="方程") as demo:
     with gr.Row(elem_id="switch"):
         b_answer = gr.Button("对答案", variant="primary")
         b_check = gr.Button("批改过程", variant="secondary")
+        b_hist = gr.Button("归档", variant="secondary")
 
     # ------------------------------------------------ 对答案
     with gr.Column(visible=True) as pane_answer:
@@ -588,10 +724,56 @@ with gr.Blocks(title="方程") as demo:
                 c_lines = gr.HTML()
             c_state = gr.State(None)
 
+    # ------------------------------------------------ 归档
+    with gr.Column(visible=False) as pane_hist:
+        hist_sum = gr.Markdown(
+            history.summary_md("「对答案」／「批改过程」"), elem_id="histsum")
+        hist_list = gr.HTML(_hist_html())
+        pend_list = gr.HTML(_pend_html())
+        with gr.Row(elem_classes=["hrow"]):
+            pend_pick = gr.Dropdown(
+                choices=pend_choices(), multiselect=True,
+                label="选中后标为已复查（可多选）", scale=5,
+            )
+            done_btn = gr.Button("已复查", size="sm", scale=1)
+            undo_btn = gr.Button("撤销", size="sm", scale=1)
+        with gr.Accordion("纸质本子上的题也能记一条", open=False):
+            mp_problem = gr.Textbox(label="题目", lines=1, placeholder="x^2-5x+6=0")
+            mp_step = gr.Textbox(label="哪一步", lines=1, placeholder="第 4 行 / 判别式那步")
+            mp_why = gr.Textbox(
+                label="为什么要回头（可不填）", lines=1,
+                placeholder="当时没想明白为什么要先算判别式",
+            )
+            mp_add = gr.Button("记下来", size="sm")
+        hist_msg = gr.Markdown(elem_id="hismsg")
+
+    hist_outputs = [hist_sum, hist_list, pend_list, pend_pick, hist_msg]
+
+    def _after_mark(keys, undo=False):
+        n = history.reopen(keys or []) if undo else history.mark_done(keys or [])
+        if not n:
+            return _hist_state("没选中。先在上面点一下那一条再按。")
+        return _hist_state(f"{'撤销' if undo else '标为已复查'}了 {n} 条。")
+
+    def _add_pending(problem, step, why):
+        if not (problem or "").strip() and not (step or "").strip():
+            return _hist_state("题目和哪一步，至少填一个。")
+        history.add_pending(problem or "", step or "", why or "")
+        return _hist_state("记下了。下次点开归档就能看见。")
+
     b_answer.click(lambda: "answer", None, mode).then(
-        switch, mode, [b_answer, b_check, pane_answer, pane_check])
+        switch, mode, [b_answer, b_check, b_hist, pane_answer, pane_check, pane_hist])
     b_check.click(lambda: "check", None, mode).then(
-        switch, mode, [b_answer, b_check, pane_answer, pane_check])
+        switch, mode, [b_answer, b_check, b_hist, pane_answer, pane_check, pane_hist])
+    # 切过来就重读一遍：不重读的话，刚做完的那道题要等下次开页面才出现。
+    b_hist.click(lambda: "hist", None, mode).then(
+        switch, mode, [b_answer, b_check, b_hist, pane_answer, pane_check, pane_hist]
+    ).then(_hist_state, None, hist_outputs)
+
+    done_btn.click(lambda k: _after_mark(k), inputs=pend_pick, outputs=hist_outputs)
+    undo_btn.click(lambda k: _after_mark(k, undo=True), inputs=pend_pick,
+                   outputs=hist_outputs)
+    mp_add.click(_add_pending, inputs=[mp_problem, mp_step, mp_why], outputs=hist_outputs)
 
     a_type.change(lambda v: gr.update(visible=bool(v)), a_type, a_text)
     c_type.change(lambda v: gr.update(visible=bool(v)), c_type, c_text)

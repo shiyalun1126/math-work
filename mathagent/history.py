@@ -31,6 +31,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -64,6 +65,22 @@ _DEDUPE_SECONDS = 3
 
 
 # --------------------------------------------------------------------------- 写
+
+def safe(fn, *args, **kwargs):
+    """跑一次归档写操作，失败只留痕、不往上抛。
+
+    用户在页面上要的是这道题的答案，不是"记录没写进去"。所以这里不弹错，
+    但也不静默：往 stderr 留一行，翻日志时能看出归档少了哪一条。
+
+    返回被调函数的结果，失败时返回 ``None``——调用方本来就只是"顺手记一笔"，
+    不需要区分这两种情况。
+    """
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[history] 归档失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+        return None
+
 
 def _now() -> datetime:
     return datetime.now()
@@ -333,12 +350,18 @@ PENDING_HEADERS = ["key", "时间", "题目", "位置", "这一步", "为什么"
 LIST_HEADERS = ["时间", "动作", "题目", "结论", "备注"]
 
 
-def summary_md() -> str:
+def summary_md(hint: str = "") -> str:
+    """摘要。``hint`` 是空态时告诉用户"去哪做一次"，措辞要跟着页面叫法走：
+
+    `app.py` 那边叫「搜题 · 求解」，学生版叫「对答案」——同一份数据，
+    两个页面的按钮名不一样，硬写死一句会让另一边的人找不着。
+    """
     recs = _read_raw()
     if not recs:
+        where = hint or "「搜题 · 求解」／「批改过程」"
         return (
             "### 归档还是空的\n\n"
-            "在「搜题 · 求解」里查一道题，或者在「批改过程」里批一份，这里就会按时间记下来。\n\n"
+            f"在{where}里做一次，这里就会按时间记下来。\n\n"
             "两类东西分开放：**题目记录**是流水（我什么时候做了什么），"
             "**待检查步骤**是欠账（哪几步还等我回头看）。"
         )

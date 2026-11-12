@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 
 import gradio as gr
 
@@ -203,16 +202,9 @@ def render(r: PipelineResult, auto: bool = False):
     )
 
 
-def _archived(fn, *args, **kwargs):
-    """归档失败不该把已经算好的结果一起吞掉。
-
-    用户此刻要的是这道题的答案，不是"归档没写进去"。所以这里只往 stderr 留一行，
-    不弹错误——但也不静默：下次看日志能发现归档少了哪一条。
-    """
-    try:
-        fn(*args, **kwargs)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[history] 归档失败：{type(exc).__name__}: {exc}", file=sys.stderr)
+# 归档写失败不该把已经算好的结果一起吞掉，具体处理在 history.safe 里。
+# 留着这个名字只是让四个调用点读起来短一点。
+_archived = history.safe
 
 
 def pend_choices(include_done: bool = False):
