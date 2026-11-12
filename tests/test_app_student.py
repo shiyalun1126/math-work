@@ -144,3 +144,50 @@ def test_archived_swallows_but_logs(app, capsys, monkeypatch):
     app._archived(boom, 1)
     err = capsys.readouterr().err
     assert "归档失败" in err and "磁盘满了" in err
+
+
+# --------------------------------------------------------------------------- 先给题目，再给答案
+#
+# 拍照进来时，屏幕上只有答案是不够的：学生先要能确认"系统把我的式子读成了什么"，
+# 才能判断这个答案是不是在答他那道题。
+
+def test_answer_starts_with_the_problem(app):
+    out = app.run_answer("x^2-5x+6=0", None, True)
+    assert out[0].startswith("### 题目")
+    assert "x^2-5x+6=0" in out[0]
+    # 题目在前、答案在后，顺序错了这一段就白做
+    assert "### 答案" in out[2]
+
+
+def test_problem_says_low_confidence(app):
+    """照片认得不准时，题目下面要提醒先核对，而不是闷着头给答案。"""
+    class _Ans:
+        latex = "2x+y=4"
+
+    md = app._problem_md(_Ans(), {"confidence": 0.55})
+    assert "55%" in md
+    assert "对一下" in md or "看一遍" in md
+
+
+def test_problem_typed_has_no_photo_note(app):
+    class _Ans:
+        latex = "x^2-5x+6=0"
+
+    md = app._problem_md(_Ans(), None, typed=True, raw="x^2-5x+6=0")
+    assert "照片" not in md
+
+
+def test_problem_falls_back_to_raw_text(app):
+    """解析失败时 ans.latex 是空的，至少把用户打的字摆出来。"""
+    class _Ans:
+        latex = ""
+
+    md = app._problem_md(_Ans(), None, typed=True, raw="解这个方程")
+    assert "解这个方程" in md
+
+
+def test_problem_without_anything_says_so(app):
+    class _Ans:
+        latex = ""
+
+    assert "没读出一个完整的式子" in app._problem_md(_Ans(), None)

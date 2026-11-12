@@ -115,6 +115,9 @@ body, .gradio-container, .prose, textarea, input, button{
 .katex-display{text-align:left !important;margin:6px 0 12px !important;}
 .katex-display>.katex{text-align:left !important;}
 
+#problem .katex-display>.katex{font-size:1.45em;}
+#problem .prose{color:var(--ink2);}
+
 #answer .katex-display>.katex{font-size:1.85em;}
 #answer .prose{font-size:16px;}
 
@@ -329,6 +332,29 @@ def _verdict_html(check: WorkCheck, scope_note: str = "") -> str:
         f"<div class='s'>{check.headline}</div>"
         f"<div class='s' style='color:#8A857B;'>{sub}</div>{note}</div>"
     )
+
+
+def _problem_md(ans, meta, typed: bool = False, raw: str = "") -> str:
+    """出答案之前先把题目摆出来。
+
+    拍照这一路尤其需要：学生手上是一张卷子，屏幕上只冒出答案时，
+    没法确认系统把式子读成了什么——答案对不对，得先看题对不对。
+    所以题目不只是回显，它是这一页的**依据**，放在最上面。
+    """
+    latex = (getattr(ans, "latex", "") or "").strip() or (raw or "").strip()
+    if not latex:
+        return "### 题目\n\n没读出一个完整的式子。"
+    out = ["### 题目\n", f"$${latex}$$"]
+    if not typed:
+        conf = (meta or {}).get("confidence", 0) or 0
+        if conf and conf < 0.9:
+            out.append(
+                f"> 照片认得只有 {conf:.0%}。先看一遍这个式子对不对；"
+                "不对就勾上面的「没有照片，我直接打字」重新算。"
+            )
+        elif conf:
+            out.append(f"> 上面这个式子是从照片里读出来的（{conf:.0%}）。")
+    return "\n".join(out)
 
 
 def _cover_md(ans) -> str:
@@ -584,7 +610,13 @@ def run_answer(text, image, explain, progress=gr.Progress()):
     _archived(history.record_search, ans.latex or t,
               source="text" if t else "photo", image=("" if t else str(image)),
               detail=history.snapshot_answer(ans))
-    return _cover_md(ans), _answer_md(ans), _steps_md(ans), _meta_md(meta, ans)
+    return (
+        _problem_md(ans, meta, typed=bool(t), raw=t),
+        _cover_md(ans),
+        _answer_md(ans),
+        _steps_md(ans),
+        _meta_md(meta, ans),
+    )
 
 
 def _doubt_choices(pc) -> list[str]:
@@ -709,6 +741,7 @@ with gr.Blocks(title="方程") as demo:
         a_go = gr.Button("看答案", variant="primary")
 
         with gr.Column(elem_classes=["out"]):
+            a_problem = gr.Markdown(elem_id="problem", latex_delimiters=LATEX_DELIMS)
             a_cover = gr.Markdown(latex_delimiters=LATEX_DELIMS)
             a_ans = gr.Markdown(
                 "拍完或打完，点上面的按钮。答案会出现在这里，下面接着是每一步怎么来的。",
@@ -830,9 +863,9 @@ with gr.Blocks(title="方程") as demo:
     c_type.change(lambda v: gr.update(visible=bool(v)), c_type, c_text)
 
     a_go.click(run_answer, [a_text, a_image, a_explain],
-               [a_cover, a_ans, a_steps, a_meta])
+               [a_problem, a_cover, a_ans, a_steps, a_meta])
     a_text.submit(run_answer, [a_text, a_image, a_explain],
-                  [a_cover, a_ans, a_steps, a_meta])
+                  [a_problem, a_cover, a_ans, a_steps, a_meta])
 
     c_go.click(run_check, [c_problem, c_text, c_image],
                [c_verdict, c_rows, c_advice, c_reads, c_lines,
