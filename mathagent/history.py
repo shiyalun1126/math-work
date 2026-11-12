@@ -464,6 +464,63 @@ def by_id(key: str) -> dict | None:
     return None
 
 
+def fill_missing_detail(rec: dict | None) -> dict | None:
+    """给没有快照的旧记录补一份明细，补得起就写回文件。
+
+    **搜题补得起**：题面本身就存着，``equations.answer`` 按同一道题再算一遍就行。
+    **批改补不了**：当时逐行怎么判的过程没落盘，"重算"没有输入——不能凭空造一份。
+
+    补出来的明细带 ``how="recomputed"``，界面据此说明它**不是当时那份**：
+    库里的代码可能已经改过，答案和当时未必完全一样。写回文件是为了只算一次，
+    不然每点一次都要重解一道题。
+    """
+    if not rec or rec.get("detail") or rec.get("kind") != "search":
+        return rec
+
+    problem = (rec.get("problem") or "").strip()
+    detail: dict = {"how": "recomputed"}
+    if problem:
+        try:
+            # 只走"解析 → 求解"这两步，不走 pipeline.run：
+            # 后者会调讲解模型（要花钱、要等网络），还会往 runs/ 里再写一份运行记录。
+            # 补一条旧记录不该有这些副作用，答案和步骤本地就能算。
+            from .latex import parse
+            from .solve import solve
+
+            pe = parse(problem)
+            if not pe.ok:
+                detail["failed"] = True
+                detail["why"] = f"题目本身解析不了：{pe.error}"[:120]
+            else:
+                sr = solve(pe)
+                detail.update(snapshot_solved(sr))
+                if not sr.ok:
+                    detail["why"] = (getattr(sr, "error", "") or "求解没结果")[:120]
+        except Exception as exc:  # noqa: BLE001
+            # 解析器抛错也算"没补出来"，别让一条旧记录把整个页面点崩。
+            detail["failed"] = True
+            detail["why"] = f"{type(exc).__name__}: {exc}"[:120]
+    else:
+        detail["failed"] = True
+        detail["why"] = "这条记录没存题目，没法重算"
+    if not (detail.get("answer") or detail.get("solutions")):
+        detail["failed"] = True
+
+    out = dict(rec, detail=detail)
+    try:
+        recs = _read_raw()
+        for i, old in enumerate(recs):
+            if old.get("id") == rec.get("id"):
+                recs[i] = out
+                break
+        else:
+            return out  # 文件里已经没有这条了（被手工删行），不写回
+        _write_raw(recs)
+    except OSError:
+        pass  # 写不进去也照样把算出来的显示出来，只是下次还得再算一遍
+    return out
+
+
 def pick_md(index: Any, limit: int = 200) -> str:
     """表格第 ``index`` 行 → 那一条的详情。
 
@@ -477,7 +534,7 @@ def pick_md(index: Any, limit: int = 200) -> str:
         key = ids[int(index)]
     except (TypeError, ValueError, IndexError):
         return "### 没读到这一行\n\n刷新一下再点。"
-    return detail_md(by_id(key))
+    return detail_md(fill_missing_detail(by_id(key)))
 
 
 def pending_rows(include_done: bool = False) -> list[list]:
@@ -557,6 +614,15 @@ KIND_WORDS = {
     "prose": "文字",
 }
 
+# 求解器内部的 kind 是英文的（equation / system / expression），
+# 详情页是给人读的，不能直接把 "equation" 端上去。
+TOPIC_WORDS = {
+    "equation": "方程",
+    "system": "方程组",
+    "expression": "代数式",
+    "inequality": "不等式",
+}
+
 
 def _tex(text: Any) -> str:
     """能当公式渲染的包上 `$`，带中文的按原文放着。
@@ -595,14 +661,39 @@ def detail_md(rec: dict | None) -> str:
     detail = rec.get("detail") or {}
 
     if not detail:
+        # 走到这里说明绕过了 ``pick_md``（它总会先试着补一份）。所以说的是
+        # "还能做什么"，而不是"就这样了"。
+        tail = (
+            "> 它是加「明细」之前存下的，当时只留了结论。"
+            "搜题的答案可以按题目重算，点表格那一行就能看到。"
+            if rec.get("kind") == "search"
+            else "> 它是加「明细」之前存下的，当时只留了结论。"
+            "批改的过程当时没落盘，补不回来；以后新做的记录能点开看逐行怎么判的。"
+        )
         head += [
             f"这条记录的结论是 **{_verdict_word(rec)}**"
             + (f"——{rec.get('headline')}" if rec.get("headline") else "。"),
             "",
-            "> 它是加「明细」之前存下的，当时只留了结论。"
-            "以后新做的记录，点开能看到逐行怎么判的。",
+            tail,
+            "",
         ]
+        # 批改的逐行判定补不回来，但"哪几步没认准"当时就单独存了 pending，
+        # 这部分不重算也能列出来，比一句空话有用。
+        pend = rec.get("pending") or []
+        if pend:
+            head += ["**当时没认准、等你看的步骤：**", ""]
+            for item in pend[:12]:
+                where = item.get("where") or (f"第 {item.get('i')} 步" if item.get("i") else "整题")
+                mark = "已复查" if item.get("done") else "待查"
+                head.append(f"- {where}：{_tex(item.get('text', ''))}（{mark}）")
+            if len(pend) > 12:
+                head.append(f"- 还有 {len(pend) - 12} 步，在下面「还等你回头看」那一区。")
+            head.append("")
         return "\n".join(head)
+
+    recomputed = detail.get("how") == "recomputed" and not detail.get("failed")
+    if recomputed:
+        head += ["> 当时只留了结论，没有明细；下面是按这道题重算的，和当时那次可能有出入。", ""]
 
     if rec.get("kind") == "search":
         head += _search_body(detail)
@@ -611,12 +702,23 @@ def detail_md(rec: dict | None) -> str:
     if rec.get("source") == "photo":
         # 拍照进来的记录，用户点开第一反应是"让我再瞅一眼那张卷子"。
         # 图是 Gradio 的临时文件，重启就没了，与其让人找，不如直说。
-        head += ["> 原图是当时上传的临时文件，已经清掉了；下面是当时识别出来的内容。", ""]
+        head += [
+            "> 原图是当时上传的临时文件，已经清掉了。题目是当时识别出来的。"
+            if not recomputed
+            else "> 原图已经清掉了。题目是当时识别出来的，上面的答案和步骤是刚重算的。",
+            "",
+        ]
     return "\n".join(head)
 
 
 def _search_body(d: dict) -> list[str]:
     out: list[str] = []
+    if d.get("failed"):
+        out += ["按这条的题目重算了一次，没得到答案——题目写法可能不完整，或者当时就没解出来。", ""]
+        if d.get("why"):
+            out += [f"> {d['why']}", ""]
+        return out
+
     answer = (d.get("answer") or "").strip()
     sols = d.get("solutions") or []
     if answer:
@@ -627,7 +729,8 @@ def _search_body(d: dict) -> list[str]:
         out += ["这道题没解出来，没留下答案。", ""]
 
     if d.get("topic"):
-        out += [f"题型：{d['topic']}", ""]
+        topic = d["topic"]
+        out += [f"题型：{TOPIC_WORDS.get(topic, topic)}", ""]
     if d.get("branches"):
         out += ["**含参，分情况：**", ""]
         out += [f"- {_tex(b)}" for b in d["branches"]]

@@ -298,3 +298,68 @@ def test_pick_md_maps_row_to_record(store):
 def test_pick_md_out_of_range(store):
     assert "没读到这一行" in history.pick_md(9)
     assert "没读到这一行" in history.pick_md(None)
+
+
+# --------------------------------------------------------------------------- 给旧记录补答案
+#
+# 归档的前几版只存结论词，点开是一句"当时只留了结论"。搜题补得起（题目还在），
+# 批改补不了（过程没落盘）；这两种情况都不能让页面崩或撒谎。
+
+def test_pick_fills_answer_for_old_search(store):
+    history.record_search("x^2-5x+6=0")
+    md = history.pick_md(0)
+    assert "答案" in md
+    assert "x = 2" in md and "x = 3" in md
+    # 补出来的要写回文件，不然每点一次都得重解一道题
+    assert history._read_raw()[0]["detail"]["how"] == "recomputed"
+
+
+def test_pick_does_not_recompute_twice(store, monkeypatch):
+    history.record_search("x^2-5x+6=0")
+    history.pick_md(0)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("已有明细就不该再算一次")
+
+    monkeypatch.setattr(history, "snapshot_solved", boom)
+    assert "x = 2" in history.pick_md(0)
+
+
+def test_pick_survives_unsolvable(store):
+    """题目现在也解不出来时，老实说，而不是抛异常把页面点崩。"""
+    history.record_search("解这个方程")
+    md = history.pick_md(0)
+    assert "没得到答案" in md
+    assert history._read_raw()[0]["detail"]["failed"] is True
+
+
+def test_recomputed_detail_says_it_is_recomputed(store):
+    """答案是按现在的代码重算的，可能和当时那次不一样，得说清楚。"""
+    history.record_search("x^2-5x+6=0")
+    assert "重算" in history.pick_md(0)
+
+
+def test_topic_word_is_chinese(store):
+    """详情页是给人读的，不能把 equation 这种内部名字端上去。"""
+    history.record_search("x^2-5x+6=0")
+    md = history.pick_md(0)
+    assert "题型：方程" in md
+    assert "题型：equation" not in md
+
+
+def test_old_grade_lists_its_pending(store):
+    """逐行判定补不回来，但"哪几步没认准"当时就单独存了。"""
+    history.record(
+        "grade", "2x+y=4", verdict="unread",
+        pending=[{"i": 2, "text": "x+3y=7", "why": "没认准", "by": "system", "done": False}],
+    )
+    md = history.pick_md(0)
+    assert "批改的过程当时没落盘" in md
+    assert "第 2 步" in md and "x+3y=7" in md
+
+
+def test_old_grade_is_not_recomputed(store):
+    """批改没有输入可重算，不能拿题面去猜一份假的逐行判定。"""
+    history.record("grade", "x^2-5x+6=0", verdict="pass", headline="全对")
+    rec = history._read_raw()[0]
+    assert not history.fill_missing_detail(rec).get("detail")
