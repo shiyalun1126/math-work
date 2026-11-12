@@ -39,6 +39,121 @@ _PREP_LOCK = threading.Lock()
 THROTTLE_RETRY = 2      # 整轮重试次数（每轮把候选模型都试一遍）
 THROTTLE_SLEEP = 4.0    # 第 n 轮前等 THROTTLE_SLEEP × n 秒
 
+# 单次 HTTP 请求的默认上限。它**不是**一次识别的时间上限——
+# 3 轮重试 × 3 个候选模型才能把这个数字乘到十几分钟。
+HTTP_TIMEOUT = 90.0
+
+# 整页时间预算：一次识别最多占用多久。
+#
+# 为什么要按行数给而不是给固定值：耗时基本跟行数成正比（每行两个来源、
+# 两个来源各自重试），固定预算的结果是"三行的页很宽松、十行的页必超时"。
+# 12 + 5n 在 3 行时给 27s、6 行 42s、24 行（MAX_LINES）132s，
+# 大致对上实测的 20s/页（6 行）。
+#
+# 这个预算**不是性能目标**，是止损线：正常情况远用不到，只有服务变慢或
+# 限流时才会撞上——那时候唯一要紧的是别让页面一直转下去。
+BUDGET_BASE = 12.0
+BUDGET_PER_LINE = 5.0
+BUDGET_ENV = "MATHAGENT_BUDGET"   # 设成秒数覆盖；设 0 表示不限（调试用）
+
+
+class RecognitionError(RuntimeError):
+    pass
+
+
+class BudgetExhausted(RecognitionError):
+    """整页预算用完，还没发出的请求被放弃。
+
+    单独一个类型是为了让上层能区分"识不出来"和"没时间去识"——
+    前者要说"这行没认准"，后者要说"这一页超时了，已认出的部分照常可用"。
+    混成一句会让学生以为是自己写得不好。
+    """
+
+
+def call_recognize(rec: "Recognizer", image, k: int = 1,
+                   deadline: "Deadline | None" = None) -> list[Candidate]:
+    """调一个识别器，兼容还没接受 deadline 的旧实现。
+
+    这一轮给 `recognize` 加了 deadline 关键字。自己写的识别器（`tools/` 下就有，
+    测试里的假识别器也是）不会跟着改，按新签名直接调会 TypeError，
+    而调用方那一层的 try/except 会把它记成"这一路认不出"——
+    整条通道静默失效，比抛异常还难查。
+
+    所以只在 TypeError 明确提到 deadline 时回退，其他 TypeError 照抛：
+    `recognize` 内部真出的 bug 不该被这里吃掉。
+    """
+    try:
+        return rec.recognize(image, k=k, deadline=deadline)
+    except TypeError as exc:
+        if "deadline" not in str(exc):
+            raise
+        return rec.recognize(image, k=k)
+
+
+class Deadline:
+    """一次调用共享的时间预算。
+
+    为什么需要它：`HTTP_TIMEOUT=90` 看着不吓人，但 `_one` 会走
+    `(THROTTLE_RETRY+1) × 候选模型数` 次，`slot2` 有 3 个候选模型，
+    单行最坏 9 × 90 + (4+8) = 822 秒；整页 24 行、并发 2，就是两个多小时。
+    这些数字在一切正常时看不到，只有服务变慢或限流时才暴露——
+    而那时用户已经在盯着转圈的页面，还以为是自己的图有问题。
+
+    预算用完之后**不抛给调用方什么都不剩**：已经拿到的候选照常返回并参与投票，
+    只是不再发新请求。慢的那一路缺席只影响旁证强度，不该连已有的结果一起丢掉。
+
+    用 monotonic 而不是 time.time：系统时间被 NTP 校正时 wall clock 会跳，
+    预算可能突然变成负数或凭空多出几小时。
+    """
+
+    __slots__ = ("t_end", "budget")
+
+    def __init__(self, budget: float | None = None):
+        self.budget = budget if (budget and budget > 0) else None
+        self.t_end = (time.monotonic() + self.budget) if self.budget else None
+
+    def left(self) -> float:
+        if self.t_end is None:
+            return float("inf")
+        return self.t_end - time.monotonic()
+
+    def expired(self, reserve: float = 0.0) -> bool:
+        """reserve：还想留多少秒做事。剩余不到这个数就算"别开始了"。"""
+        return self.left() <= reserve
+
+    def cap(self, timeout: float, floor: float = 0.5) -> float:
+        """把单个请求的超时压进剩余预算。
+
+        没有这一步，预算只是个摆设：预算剩 2 秒时照样发一个 90 秒超时的请求，
+        用户仍然要等 90 秒。floor 是给小请求留的最小值，避免 timeout≈0
+        被 requests 当成"立即超时"而把一个本该成功的小请求判死。
+        """
+        if self.t_end is None:
+            return timeout
+        return max(floor, min(timeout, self.left()))
+
+    def describe(self) -> str:
+        if self.budget is None:
+            return "未设预算"
+        return f"预算 {self.budget:.0f}s，剩余 {max(0.0, self.left()):.1f}s"
+
+
+def budget_for(lines: int = 1) -> float | None:
+    """按行数算这次调用的预算。返回 None 表示不限（只给调试用）。
+
+    环境变量 `MATHAGENT_BUDGET` 优先：调 prompt 时想让它跑到底看真实耗时，
+    设 0 就行；线上要更紧或更松也只改环境，不用动代码。
+    """
+    raw = os.environ.get(BUDGET_ENV, "").strip()
+    if raw:
+        try:
+            val = float(raw)
+        except ValueError:
+            val = None
+        if val is not None:
+            return val if val > 0 else None
+    return BUDGET_BASE + BUDGET_PER_LINE * max(1, lines)
+
 # 模型的自言自语里才有的词。手写数学一行式子不会出现这些。
 _META_PROSE = re.compile(r"图片|图中|用户|规则|假设|要求|说明|以上|注意|最终结果|重新")
 
@@ -52,10 +167,6 @@ _META_PROSE = re.compile(r"图片|图中|用户|规则|假设|要求|说明|以�
 # 预处理（裁墨迹 / 缩放 / JPEG 质量）决定了送进模型的像素，
 # 但它没法像提示词那样自动算哈希，改动时手工把 _PREP_VERSION 加一。
 _PREP_VERSION = "prep1"
-
-
-class RecognitionError(RuntimeError):
-    pass
 
 
 def _ink_bbox(im: Image.Image, thr: int = 165) -> tuple[int, int, int, int] | None:
@@ -153,7 +264,8 @@ class Recognizer:
     def available(self) -> bool:
         return False
 
-    def recognize(self, image: str | Path, k: int = 1) -> list[Candidate]:
+    def recognize(self, image: str | Path, k: int = 1,
+                  deadline: Deadline | None = None) -> list[Candidate]:
         raise NotImplementedError
 
 
@@ -250,7 +362,8 @@ class SimpleTexRecognizer(Recognizer):
     def available(self) -> bool:
         return config.has_simpletex()
 
-    def recognize(self, image: str | Path, k: int = 1) -> list[Candidate]:
+    def recognize(self, image: str | Path, k: int = 1,
+                  deadline: Deadline | None = None) -> list[Candidate]:
         if not self.available():
             raise RecognitionError("未配置 SIMPLETEX_TOKEN（见 .env 通道 1）")
         digest = file_digest(image)
@@ -259,13 +372,16 @@ class SimpleTexRecognizer(Recognizer):
             return [Candidate(**hit)]
 
         data, mime = prepare_image(image)
+        dl = deadline or Deadline(None)
+        if dl.expired(reserve=1.0):
+            raise BudgetExhausted(f"本页时间用完了（{dl.describe()}）")
         t0 = time.time()
         try:
             r = requests.post(
                 self.url,
                 files={"file": (Path(image).name, data, mime)},
                 headers={"token": config.simpletex_token()},
-                timeout=40,
+                timeout=dl.cap(40.0),
             )
         except requests.RequestException as exc:
             raise RecognitionError(f"网络不通：{exc}") from exc
@@ -396,7 +512,8 @@ class VLMRecognizer(Recognizer):
         out = [m.strip() for m in raw.split(",") if m.strip()]
         return [m for m in out if m != self.model]
 
-    def _post(self, model: str, data_b64: str, temperature: float):
+    def _post(self, model: str, data_b64: str, temperature: float,
+              timeout: float = HTTP_TIMEOUT):
         payload = {
             "model": model,
             "messages": [
@@ -419,15 +536,17 @@ class VLMRecognizer(Recognizer):
                 f"{self.base}/chat/completions",
                 json=payload,
                 headers={"Authorization": f"Bearer {self._key}"},
-                timeout=90,
+                timeout=timeout,
             )
         except requests.RequestException as exc:
             raise RecognitionError(f"网络不通：{exc}") from exc
 
-    def _one(self, data_b64: str, temperature: float) -> str:
+    def _one(self, data_b64: str, temperature: float,
+             deadline: Deadline | None = None) -> str:
         self.used_model = self.model
         models = [self.model] + self._fallbacks()
         throttled: list[str] = []
+        dl = deadline or Deadline(None)
 
         # 限流要退避重试，不能立刻认输。免费档的 429 是"这一秒太多"，
         # 几秒后同一模型往往就通了；原来一遇 429 就切下一个模型或直接报错，
@@ -435,7 +554,11 @@ class VLMRecognizer(Recognizer):
         # 那看起来像"认不出来"，其实是没去问第二遍。
         for attempt in range(THROTTLE_RETRY + 1):
             for model in models:
-                r = self._post(model, data_b64, temperature)
+                # 预算见底就不再发新请求。1 秒的余量是留给建连本身的：
+                # 剩 0.2 秒还发请求，只会换来一个必然的 ConnectTimeout。
+                if dl.expired(reserve=1.0):
+                    raise BudgetExhausted(f"本页时间用完了（{dl.describe()}）")
+                r = self._post(model, data_b64, temperature, dl.cap(HTTP_TIMEOUT))
                 if r.status_code == 200:
                     self.used_model = model
                     data = r.json()
@@ -466,14 +589,23 @@ class VLMRecognizer(Recognizer):
                 raise RecognitionError(f"HTTP {r.status_code}: {body}")
 
             if attempt < THROTTLE_RETRY:
-                time.sleep(THROTTLE_SLEEP * (attempt + 1))
+                nap = THROTTLE_SLEEP * (attempt + 1)
+                # 睡不起就别睡：退避的前提是"过几秒重试还有机会成"，
+                # 剩余预算不够再发一次请求时，只会让人多等几秒换来同样的失败。
+                if dl.expired(reserve=nap + 1.0):
+                    raise BudgetExhausted(
+                        f"本页时间用完了（{dl.describe()}），不再退避重试")
+                time.sleep(nap)
 
+        if dl.expired():
+            raise BudgetExhausted(f"本页时间用完了（{dl.describe()}）")
         raise RecognitionError(
             f"限流（429）：{'、'.join(throttled) or '全部候选模型'} 重试 "
             f"{THROTTLE_RETRY} 次仍不可用，免费档高峰常见，换时段再试"
         )
 
-    def recognize(self, image: str | Path, k: int = 1) -> list[Candidate]:
+    def recognize(self, image: str | Path, k: int = 1,
+                  deadline: Deadline | None = None) -> list[Candidate]:
         if not self.available():
             raise RecognitionError(f"未配置 {self.env_hint}（见 .env）")
         digest = file_digest(image)
@@ -482,6 +614,13 @@ class VLMRecognizer(Recognizer):
 
         out: list[Candidate] = []
         for i in range(max(1, k)):
+            # 第二次采样是"同一模型再问一遍"，用来做自一致性检查；
+            # 预算不够时跳过它不影响这一行有没有结果，只是少了自洽证据。
+            if i and deadline is not None and deadline.expired(reserve=1.5):
+                out.append(Candidate(
+                    latex="", source=self.name,
+                    note=f"采样跳过：{deadline.describe()}"))
+                break
             temp = round(0.2 + 0.3 * i, 2)
             key = (digest, self.model, str(temp), _PREP_VERSION, _PROMPT_FP)
             hit = self.cache.get(*key)
@@ -490,7 +629,7 @@ class VLMRecognizer(Recognizer):
                 continue
             t0 = time.time()
             try:
-                latex = self._one(b64, temp)
+                latex = self._one(b64, temp, deadline)
             except Exception as exc:  # noqa: BLE001
                 out.append(
                     Candidate(latex="", source=self.name, note=f"{type(exc).__name__}: {exc}")
@@ -522,7 +661,12 @@ class VLMRecognizer(Recognizer):
             )
             self.cache.put(cand.to_dict(), *key)
             out.append(cand)
-        return [c for c in out if c.latex] or out
+        # 只丢"什么都没有"的候选。带 note 的必须留着——那是"这次为什么没读到"
+        # 的唯一记录，上层靠它区分"认不出"和"没时间认"。以前一律按 latex 过滤，
+        # 于是"k=2 的第二次超时跳过"这种说明在返回时被悄悄吞掉，
+        # 界面上只剩"这一行没认准"，看不出是撞了时间上限。
+        # 投票侧本来就忽略空 latex 的候选，保留它们不影响结论。
+        return [c for c in out if c.latex or c.note] or out
 
 
 # 旧名字保留，避免外部脚本 import 报错
@@ -586,7 +730,8 @@ class FixtureRecognizer(Recognizer):
     def available(self) -> bool:
         return bool(self.data)
 
-    def recognize(self, image: str | Path, k: int = 1) -> list[Candidate]:
+    def recognize(self, image: str | Path, k: int = 1,
+                  deadline: Deadline | None = None) -> list[Candidate]:
         stem = Path(image).stem
         entry = self.data.get(stem)
         if not entry:

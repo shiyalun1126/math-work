@@ -32,7 +32,7 @@ import sympy
 
 from . import config
 from .lines import PageSplit, save_crops, split_page
-from .perceive import build_ensemble
+from .perceive import Deadline, budget_for, build_ensemble, call_recognize
 from .types import Candidate, WorkCheck
 from .workcheck import grade
 
@@ -680,11 +680,12 @@ def _prose_ok(latex: str, cands: list[Candidate]) -> bool:
     return bool(strong) and all(_is_prose(t) for t in strong)
 
 
-def _read_one(index: int, crop_path: str, recs, k: int, require_corroboration: bool = True) -> LineRead:
+def _read_one(index: int, crop_path: str, recs, k: int, require_corroboration: bool = True,
+              deadline: Deadline | None = None) -> LineRead:
     cands: list[Candidate] = []
     for rec in recs:
         try:
-            cands.extend(rec.recognize(crop_path, k=k))
+            cands.extend(call_recognize(rec, crop_path, k, deadline))
         except Exception as exc:  # noqa: BLE001
             cands.append(
                 Candidate(latex="", source=rec.name, note=f"{type(exc).__name__}: {exc}")
@@ -771,14 +772,30 @@ def read_page(
 
     # 逐行并发：单行两个来源、六行就是一打请求，串着等要等半分钟
     require = len(recs) > 1        # 只有一个识别器时"要旁证"等于"永远判不了"
+    # 预算按"真正要认的行数"算，空白行不占额度——否则空白多的页会平白被砍时间
+    dl = Deadline(budget_for(len(todo) or 1))
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(todo) or 1))) as pool:
         futures = [
-            pool.submit(_read_one, idx, path, recs, k, require) for idx, path in todo
+            pool.submit(_read_one, idx, path, recs, k, require, dl) for idx, path in todo
         ]
         results.extend(f.result() for f in futures)
     results.sort(key=lambda r: r.index)
     _tiebreak_by_math(results)
     timings["recognize"] = time.time() - t0
+
+    # 超时行要单独报出来。说"这一行没认准"是本分，说"这一页超时了"才是原因；
+    # 混成一句，学生看到"没认准"只会以为是自己写得不好。
+    timed_out = sum(
+        1 for r in results
+        if any("BudgetExhausted" in (x or "") for x in r.reasons)
+    )
+    if timed_out:
+        timings["recognize_timed_out"] = float(timed_out)
+        timings["recognize_budget"] = float(dl.budget or 0)
+        page.note = (page.note + "；" if page.note else "") + (
+            f"整页识别撞上 {dl.budget:.0f}s 时间上限，有 {timed_out} 行没来得及认。"
+            "已认出的行照常可用；这几行请稍后重试或重新拍一张。"
+        )
     return page, results, timings
 
 

@@ -16,7 +16,15 @@ from pathlib import Path
 from . import config
 from .explain import explain as explain_steps
 from .latex import parse
-from .perceive import FixtureRecognizer, Recognizer, build_ensemble, page_note
+from .perceive import (
+    Deadline,
+    FixtureRecognizer,
+    Recognizer,
+    budget_for,
+    build_ensemble,
+    call_recognize,
+    page_note,
+)
 from .route import detect
 from .solve import solve as solve_parsed
 from .types import Candidate, ParsedExpr, PipelineResult, SolveResult, VerificationResult
@@ -31,15 +39,17 @@ NO_KEY_HINT = (
 )
 
 
-def _one_source(rec: Recognizer, image, k: int) -> list[Candidate]:
+def _one_source(rec: Recognizer, image, k: int,
+                deadline: Deadline | None = None) -> list[Candidate]:
     """单个通道识别。异常就地转成带 note 的候选，不让一路故障拖垮整页。"""
     try:
-        return rec.recognize(image, k=k)
+        return call_recognize(rec, image, k, deadline)
     except Exception as exc:  # noqa: BLE001
         return [Candidate(latex="", source=rec.name, note=f"{type(exc).__name__}: {exc}")]
 
 
-def _collect(image, recognizers: list[Recognizer], k: int) -> list[Candidate]:
+def _collect(image, recognizers: list[Recognizer], k: int,
+             deadline: Deadline | None = None) -> list[Candidate]:
     """多个识别通道**并发**跑。
 
     这里原来是串行 for 循环，于是「SimpleTex 8 秒 + 通义 12 秒」要等 20 秒。
@@ -53,9 +63,9 @@ def _collect(image, recognizers: list[Recognizer], k: int) -> list[Candidate]:
     if not recognizers:
         return []
     if len(recognizers) == 1:
-        return _one_source(recognizers[0], image, k)
+        return _one_source(recognizers[0], image, k, deadline)
     with ThreadPoolExecutor(max_workers=len(recognizers), thread_name_prefix="perceive") as pool:
-        groups = list(pool.map(lambda r: _one_source(r, image, k), recognizers))
+        groups = list(pool.map(lambda r: _one_source(r, image, k, deadline), recognizers))
     return [c for group in groups for c in group]
 
 
@@ -98,7 +108,15 @@ def run(
                 )
             recs = [fix]
         note = page_note(image)
-        cands = _collect(image, recs, k)
+        # 单图识别看不到行数（这里还没切行），按 2 行的量给预算。
+        # 它只约束"最多等多久"，正常请求远用不到——真撞上了说明服务在慢，
+        # 这时候快速降级比让页面转两分钟更诚实。
+        dl = Deadline(budget_for(2))
+        cands = _collect(image, recs, k, dl)
+        # 超时要能上报，否则"慢"和"认不出"在日志里长得一模一样
+        timed_out = sum(1 for c in cands if "BudgetExhausted" in (c.note or ""))
+        if timed_out:
+            timings["perceive_timed_out"] = float(timed_out)
     else:
         raise ValueError("image 和 latex 至少给一个")
     timings["perceive"] = time.time() - t0
