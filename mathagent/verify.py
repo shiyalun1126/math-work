@@ -29,7 +29,7 @@ def _simplify_is_zero(diff, timeout: float = _SIMPLIFY_TIMEOUT) -> bool:
     return bool(guard.run("simplify_zero", diff, timeout=timeout, default=False))
 
 
-def equivalent(a: ParsedExpr, b: ParsedExpr) -> bool:
+def equivalent(a: ParsedExpr, b: ParsedExpr, *, scaled: bool = True) -> bool:
     """语义等价。
 
     方程组单独走一路：它的"值"不是把各条方程相加能表示的。求和会把约束抵消
@@ -60,7 +60,7 @@ def equivalent(a: ParsedExpr, b: ParsedExpr) -> bool:
             return False
     if _simplify_is_zero(diff):
         return True
-    if a.kind == "equation" and b.kind == "equation":
+    if scaled and a.kind == "equation" and b.kind == "equation":
         # `x=1` 与 `1=x`、`2x=2` 是同一个方程：零点相同，只是两边同乘了一个
         # 非零常数。压成 lhs-rhs 之后差的是个倍数，不是零，所以上面的判零
         # 抓不到。不认这一条，两个模型把同一行读成同一个方程的两种写法，

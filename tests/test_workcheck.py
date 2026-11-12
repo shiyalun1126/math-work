@@ -311,3 +311,32 @@ def test_copying_the_problem_is_not_an_answer():
         problem=r"\begin{cases}x+y=3\\x-y=1\end{cases}",
     )
     assert w.grade != "pass", (w.grade, w.headline)
+
+
+def test_misread_problem_line_is_not_blamed_on_the_student():
+    """题面那行被读错、人在输入框里给了正确题面时，不能判"伪推导"。
+
+    这一行会被当成"学生的第一步"，第二行的答案拿它当基准去比，于是
+    "x=2 或 x=3" 代进 x²-5x+7=0 不成立——学生全对，罪名是编造推导。
+    现在的做法：把它认成题面（但按人给的那道题判），并在结论里说清楚。
+    """
+    w = grade("x^2-5x+7=0\nx=2 或 x=3", problem="x^2-5x+6=0")
+    assert w.grade == "pass", (w.grade, w.headline)
+    assert w.steps[0].role == "problem_misread"
+    assert any("对不上" in n for n in w.notes)
+
+
+def test_a_real_first_step_is_not_mistaken_for_the_problem():
+    """学生真正的第一步（跟题面差得远）不能被当成"抄题"吞掉。"""
+    w = grade("2x^2-10x+12=0\nx=2 或 x=3", problem="x^2-5x+6=0")
+    assert w.steps[0].role != "problem"
+    assert w.steps[0].role != "problem_misread"
+
+
+def test_a_derivation_that_is_a_multiple_of_the_problem_is_still_a_step():
+    """`2x=6` 与题面 `x=3` 差两倍——那是"两边同除"，不是抄题。
+
+    这个判据只用在"认题面"上；投票那边反过来，差一个倍数就当同一个答案。
+    """
+    w = grade("2x=6\nx=3", problem="x=3")
+    assert w.steps[0].role != "problem"

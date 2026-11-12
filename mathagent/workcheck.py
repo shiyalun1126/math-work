@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 import time
 from dataclasses import dataclass, field
@@ -881,7 +882,7 @@ def _grade_linear_system(items, res: WorkCheck, ppe, t0: float) -> WorkCheck:
     got: list[tuple] = []
 
     for it in items:
-        if it.role == "problem":
+        if it.role in ("problem", "problem_misread"):
             it.verdict = "note"
             it.reason = "题面"
             it.row = ["题面", "—"]
@@ -1060,6 +1061,29 @@ def _grade_linear_system(items, res: WorkCheck, ppe, t0: float) -> WorkCheck:
 # ------------------------------------------------------------------ 主流程
 
 
+def _looks_misread_problem(line: ParsedExpr, prob: ParsedExpr) -> bool:
+    """这一行像不像"题面被读错了一点"。
+
+    两条同时成立才算：同一个未知数集合、字面高度相似（归一化后相似度 ≥ 0.75）。
+    只能用于"题面是外面给的、页面上没有一行对得上"的情形——否则会把学生
+    真正的第一步当成题面，白白放过一个错。相似度而不是"差几处"：手写把
+    6 读成 7、把 `+` 读成 `-`，字面上就差一个字符。
+    """
+    if line.kind != prob.kind or line.kind not in ("equation", "system"):
+        return False
+    a, b = _diffof(line), _diffof(prob)
+    if a is None or b is None:
+        return False
+    syms_a, syms_b = getattr(a, "free_symbols", set()), getattr(b, "free_symbols", set())
+    if not syms_a or syms_a != syms_b:
+        return False
+    sa = (line.normalized or "").replace(" ", "")
+    sb = (prob.normalized or "").replace(" ", "")
+    if not sa or not sb:
+        return False
+    return difflib.SequenceMatcher(None, sa, sb).ratio() >= 0.75
+
+
 def grade(
     work: str | list[str],
     problem: str = "",
@@ -1141,7 +1165,23 @@ def grade(
         if hit is None:
             hit = next(
                 (it for it in cands
-                 if _guard("equivalent", it.pe, ppe, default=False)), None
+                 if _guard("equivalent_strict", it.pe, ppe, default=False)), None
+            )
+        if hit is None and cands and _looks_misread_problem(cands[0].pe, ppe):
+            # 题面是外面给的（人在输入框里填的），页面上却没有一行对得上——
+            # 最常见的原因就是题面那行被读错了。
+            #
+            # 不处理的话它会当成"学生的第一步"，第二行的答案拿它当基准去比，
+            # 判出「过程有一步不成立，但最终答案是对的」= 伪推导。那是这套系统里
+            # 最重的一种冤枉：学生全对，罪名是编造推导。
+            #
+            # 判据要求"像同一道题的两种写法"（同未知数、字面高度相似），
+            # 不是"随便一行都算"——学生真正的第一步（`2x²-10x+12=0`）跟题面
+            # 差得远，不会被这一条吃掉。
+            cands[0].role = "problem_misread"
+            res.notes.append(
+                f"第 {cands[0].idx} 行像是题面，但和你给的题面对不上（可能被认错了）。"
+                "按你给的题面判，这一行不参与比对。"
             )
         if hit is not None:
             hit.role = "problem"
@@ -1162,11 +1202,15 @@ def grade(
     first_err = -1
 
     for it in items:
-        if it.role == "problem":
+        if it.role in ("problem", "problem_misread"):
             it.verdict = "note"
             it.reason = "题面"
             it.row = ["题面", "—"]
-            base = it
+            # 读错的那一行只能算"这一行是题面"，不能算"题目就是这个"——
+            # 基准要换成人给的那道题，否则下一行的答案还是拿去跟读错的式子比。
+            base = it if it.role == "problem" else _Line(
+                idx=it.idx, raw=it.raw, kind=ppe.kind, pe=ppe, role="problem"
+            )
             continue
 
         if it.idx in declare_ids:
@@ -1280,7 +1324,8 @@ def grade(
     if not got:
         last = next(
             (x for x in reversed(items)
-             if x.kind in ("equation", "system") and x.role != "problem"),
+             if x.kind in ("equation", "system")
+             and x.role not in ("problem", "problem_misread")),
             None,
         )
         if last is not None and last.pe is not None:

@@ -66,6 +66,12 @@ def _dispatch(op: str, args: tuple):
         from .verify import equivalent
 
         return bool(equivalent(args[0], args[1]))
+    if op == "equivalent_strict":
+        # 只认"两边相减化简为零"，不认"差一个常数倍"。认题面用这个：
+        # `2x=6` 与题面 `x=3` 差两倍，但它是学生的**推导**，不是抄题。
+        from .verify import equivalent
+
+        return bool(equivalent(args[0], args[1], scaled=False))
     if op == "solve_core":
         from .solve import _solve_core
 
