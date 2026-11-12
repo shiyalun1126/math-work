@@ -621,6 +621,7 @@ TOPIC_WORDS = {
     "system": "方程组",
     "expression": "代数式",
     "inequality": "不等式",
+    "param": "含参方程",
 }
 
 
@@ -636,6 +637,10 @@ def _tex(text: Any) -> str:
     s = str(text or "").strip()
     if not s:
         return "—"
+    if s.endswith("…"):
+        # 被快照裁剪过的串不能包 `$`：括号已经缺了一个，MathJax 会整段报错，
+        # 而不是像别处那样降级成纯文本。宁可不排公式，也要让它读得下去。
+        return s
     bare = re.sub(r"\\text\{[^}]*\}", "", s)
     return s if re.search(r"[\u4e00-\u9fff]", bare) else f"${s}$"
 
@@ -721,10 +726,19 @@ def _search_body(d: dict) -> list[str]:
 
     answer = (d.get("answer") or "").strip()
     sols = d.get("solutions") or []
-    if answer:
+    # 快照会按字符裁剪，被裁过的串末尾带 `…`。这种半截 LaTeX 既不能包 `$`
+    # （MathJax 会报缺括号），摆出来也只是 `\frac{- b - \sqrt{…` 一堆乱码，
+    # 所以干脆指到下面「怎么来的」——那里是一条一条完整的。
+    cut = any(str(x).rstrip().endswith("…") for x in ([answer] if answer else []) + list(sols))
+    if answer and not cut:
         out += [f"答案：**{_tex(answer)}**", ""]
-    elif sols:
+    elif len(sols) > 2:
+        # 含参方程动辄六种情形，join 成一行会横着排出屏幕外
+        out += ["答案：", ""] + [f"- {_tex(x)}" for x in sols] + [""]
+    elif sols and not cut:
         out += [f"答案：**{'，'.join(_tex(x) for x in sols)}**", ""]
+    elif cut:
+        out += ["答案太长，一行放不下（含参要按情形分开）；下面「怎么来的」里逐条列了。", ""]
     else:
         out += ["这道题没解出来，没留下答案。", ""]
 

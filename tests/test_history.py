@@ -363,3 +363,17 @@ def test_old_grade_is_not_recomputed(store):
     history.record("grade", "x^2-5x+6=0", verdict="pass", headline="全对")
     rec = history._read_raw()[0]
     assert not history.fill_missing_detail(rec).get("detail")
+
+
+def test_tex_does_not_wrap_cut_string(store):
+    """被快照裁断的串包 `$` 会让 MathJax 报缺括号，整页显示成源码。"""
+    assert history._tex(r"x = \frac{- b - \sqrt{…") == r"x = \frac{- b - \sqrt{…"
+
+
+def test_cut_answer_points_to_steps(store):
+    """含参题的答案一行放不下，指到下面「怎么来的」，别摆半截 LaTeX。"""
+    history.record("search", "ax^2+bx+c=0",
+                   detail={"solutions": [r"①\ a \ne 0: x = \frac{- b - \sqrt{- 4…"]})
+    md = history.detail_md(history._read_raw()[0])
+    assert "答案太长" in md
+    assert "\\frac" not in md
