@@ -89,8 +89,9 @@ CI 在每次 push 时自动跑一遍（`.github/workflows/ci.yml`）。
 - 检查：`python tools/check_assets.py`（`--strict` 把未核实的项当失败）
 - 说明：[`docs/资产来源与授权.md`](docs/资产来源与授权.md)
 
-目前 5 张实拍衍生图与 1 组识别文本快照（`data/photo_results_v*.jsonl`）标为 `pending`——
-目检无姓名/学号/学校，但发布权待记录人确认。
+现存 5 张实拍衍生图与 1 组识别文本快照（`data/photo_results_v*.jsonl`）已登记来源：
+手写内容为自己与家人写的练手题，图内无姓名/学号/学校，已确认可公开。
+新增这类资产必须先在表里登记，否则 CI 会红。
 
 ## 许可
 

@@ -30,7 +30,7 @@ jobs:
         run: pytest -q
 
       - name: 核对资产来源
-        # 只拦"新增图片没登记"和"运行时产物没被 ignore"这两类硬错误。
-        # 授权待核实的项（status=pending）只打印警告：那是要人来答的问题，
-        # 让 CI 红着不会让谁更快回答，只会让人习惯性忽略红叉。
-        run: python tools/check_assets.py
+        # --strict：除"新增图片没登记""运行时产物没被 ignore"外，连"发布权未核实"
+        # （status=pending）也算失败。现在 6 项已确认可公开，清单里没有 pending；
+        # 以后有人再往仓库里放实拍图却忘了核发布权，这里会红，而不是安静地合进去。
+        run: python tools/check_assets.py --strict
